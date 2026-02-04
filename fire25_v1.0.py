@@ -790,6 +790,8 @@ elif is_puddle:
     """, unsafe_allow_html=True)
     
     # 웅덩이 대응 계산
+    import math
+    
     sgov_minimum = total_value * 0.07
     available_sgov = max(0, sgov_value - sgov_minimum)
     injection_sgov = available_sgov * 0.30
@@ -808,6 +810,24 @@ elif is_puddle:
         sgov_shares_total = sgov_value / sgov_price
         sgov_shares_to_sell = injection_sgov / sgov_price
     
+    # 매도는 올림 (2.6 → 3주)
+    sgov_shares_to_sell_int = math.ceil(sgov_shares_to_sell)
+    actual_sgov_amount = sgov_shares_to_sell_int * sgov_price
+    
+    # 실제 총 투입액 재계산
+    actual_total_injection = actual_sgov_amount + injection_deposit + injection_new
+    
+    # 매수는 내림 (2.6 → 2주)
+    qqqm_shares = math.floor(actual_total_injection * 0.70 / qqqm_data['price'])
+    schd_shares = math.floor(actual_total_injection * 0.15 / schd_data['price'])
+    iau_shares = math.floor(actual_total_injection * 0.05 / iau_data['price'])
+    sgov_buy_amount = actual_total_injection * 0.10
+    
+    # 실제 매수 금액
+    qqqm_buy_amount = qqqm_shares * qqqm_data['price']
+    schd_buy_amount = schd_shares * schd_data['price']
+    iau_buy_amount = iau_shares * iau_data['price']
+    
     # 투입 가능 자금 표시
     st.success("💰 투입 가능 자금")
     
@@ -815,19 +835,24 @@ elif is_puddle:
     st.write(f"• SGOV 보유: ${sgov_value:,.2f} (약 {sgov_shares_total:.1f}주 @ ${sgov_price:.2f})")
     st.write(f"  └─ 최소 유지 (7%): ${sgov_minimum:,.2f}")
     st.write(f"  └─ 사용 가능: ${available_sgov:,.2f}")
-    st.write(f"• **SGOV 30% 매도: {sgov_shares_to_sell:.1f}주 = ${injection_sgov:,.2f}**")
+    st.write(f"• **SGOV 매도: {sgov_shares_to_sell_int}주** = ${actual_sgov_amount:,.2f}")
     st.write(f"• 예수금 전액: ${injection_deposit:,.2f}")
     if has_new_cash:
         st.write(f"• 신규 자금: ${injection_new:,.2f}")
     st.markdown("---")
-    st.write(f"**총 투입 가능: :green[${total_injection:,.2f}]**")
+    st.write(f"**총 투입 가능: :green[${actual_total_injection:,.2f}]**")
     
     st.markdown("")
-    st.info("📊 매수 전략")
-    st.write(f"• QQQM 70%: ${total_injection * 0.70:,.2f} (약 {(total_injection * 0.70 / qqqm_data['price']):.1f}주)")
-    st.write(f"• SCHD 15%: ${total_injection * 0.15:,.2f} (약 {(total_injection * 0.15 / schd_data['price']):.1f}주)")
-    st.write(f"• IAU 5%: ${total_injection * 0.05:,.2f} (약 {(total_injection * 0.05 / iau_data['price']):.1f}주)")
-    st.write(f"• SGOV 10%: ${total_injection * 0.10:,.2f}")
+    st.info("📊 매수 전략 (실행 가능한 주식 수)")
+    st.write(f"• **QQQM: {qqqm_shares}주** = ${qqqm_buy_amount:,.2f}")
+    st.write(f"• **SCHD: {schd_shares}주** = ${schd_buy_amount:,.2f}")
+    st.write(f"• **IAU: {iau_shares}주** = ${iau_buy_amount:,.2f}")
+    st.write(f"• **SGOV: ${sgov_buy_amount:,.2f}**")
+    
+    # 실제 사용 금액 합계
+    total_actual_use = qqqm_buy_amount + schd_buy_amount + iau_buy_amount + sgov_buy_amount
+    remaining = actual_total_injection - total_actual_use
+    st.caption(f"💡 실제 사용: ${total_actual_use:,.2f} | 잔액: ${remaining:,.2f}")
 
 # 우선순위 3: Smart Shoulder (리밸런싱)
 elif needs_rebalancing:
@@ -839,28 +864,59 @@ elif needs_rebalancing:
     """, unsafe_allow_html=True)
     
     # 초과분 계산
+    import math
+    
     excess_pct = qqqm_pct - 70
     excess_value = total_value * (excess_pct / 100)
     excess_qty = excess_value / qqqm_data['price']
     
+    # 매도는 올림
+    excess_qty_int = math.ceil(excess_qty)
+    actual_sell_value = excess_qty_int * qqqm_data['price']
+    
+    # 매수는 내림
+    schd_buy_shares = math.floor(actual_sell_value * 0.60 / schd_data['price'])
+    iau_buy_shares = math.floor(actual_sell_value * 0.20 / iau_data['price'])
+    sgov_buy_value = actual_sell_value * 0.20
+    
+    # 실제 매수 금액
+    schd_buy_value = schd_buy_shares * schd_data['price']
+    iau_buy_value = iau_buy_shares * iau_data['price']
+    
     st.error("🔴 매도 필요")
-    st.write(f"**QQQM 매도:** {excess_qty:.1f}주")
-    st.write(f"• 매도 금액: ${excess_value:,.2f}")
+    st.write(f"**QQQM 매도: {excess_qty_int}주** = ${actual_sell_value:,.2f}")
     st.write(f"• 조정 후 비중: {qqqm_pct:.1f}% → 70%")
     
     st.markdown("")
-    st.info("💰 매도 대금 재배분")
-    st.write(f"• SCHD: ${excess_value * 0.60:,.2f} (약 {(excess_value * 0.60 / schd_data['price']):.1f}주)")
-    st.write(f"• IAU: ${excess_value * 0.20:,.2f} (약 {(excess_value * 0.20 / iau_data['price']):.1f}주)")
-    st.write(f"• SGOV: ${excess_value * 0.20:,.2f}")
+    st.info("💰 매도 대금 재배분 (실행 가능한 주식 수)")
+    st.write(f"• **SCHD: {schd_buy_shares}주** = ${schd_buy_value:,.2f}")
+    st.write(f"• **IAU: {iau_buy_shares}주** = ${iau_buy_value:,.2f}")
+    st.write(f"• **SGOV: ${sgov_buy_value:,.2f}**")
+    
+    total_rebalance_use = schd_buy_value + iau_buy_value + sgov_buy_value
+    rebalance_remaining = actual_sell_value - total_rebalance_use
+    st.caption(f"💡 실제 사용: ${total_rebalance_use:,.2f} | 잔액: ${rebalance_remaining:,.2f}")
     
     if has_new_cash:
         st.markdown("")
         st.warning(f"💰 신규 자금 배분 (${new_cash:,.2f})")
         st.write("QQQM 비중이 높으므로 SCHD/IAU/SGOV 위주 배분")
-        st.write(f"• SCHD: ${new_cash * 0.60:,.2f} (약 {(new_cash * 0.60 / schd_data['price']):.1f}주)")
-        st.write(f"• IAU: ${new_cash * 0.20:,.2f} (약 {(new_cash * 0.20 / iau_data['price']):.1f}주)")
-        st.write(f"• SGOV: ${new_cash * 0.20:,.2f}")
+        
+        # 신규 자금도 내림 적용
+        new_schd_shares = math.floor(new_cash * 0.60 / schd_data['price'])
+        new_iau_shares = math.floor(new_cash * 0.20 / iau_data['price'])
+        new_sgov_value = new_cash * 0.20
+        
+        new_schd_value = new_schd_shares * schd_data['price']
+        new_iau_value = new_iau_shares * iau_data['price']
+        
+        st.write(f"• **SCHD: {new_schd_shares}주** = ${new_schd_value:,.2f}")
+        st.write(f"• **IAU: {new_iau_shares}주** = ${new_iau_value:,.2f}")
+        st.write(f"• **SGOV: ${new_sgov_value:,.2f}**")
+        
+        new_total_use = new_schd_value + new_iau_value + new_sgov_value
+        new_remaining = new_cash - new_total_use
+        st.caption(f"💡 실제 사용: ${new_total_use:,.2f} | 잔액: ${new_remaining:,.2f}")
 
 # 정상 상황: 월급 배분
 elif has_new_cash:
@@ -871,18 +927,35 @@ elif has_new_cash:
     </div>
     """, unsafe_allow_html=True)
     
+    import math
+    
+    # 매수는 내림
+    normal_qqqm_shares = math.floor(new_cash * 0.70 / qqqm_data['price'])
+    normal_schd_shares = math.floor(new_cash * 0.15 / schd_data['price'])
+    normal_iau_shares = math.floor(new_cash * 0.05 / iau_data['price'])
+    normal_sgov_value = new_cash * 0.10
+    
+    # 실제 금액
+    normal_qqqm_value = normal_qqqm_shares * qqqm_data['price']
+    normal_schd_value = normal_schd_shares * schd_data['price']
+    normal_iau_value = normal_iau_shares * iau_data['price']
+    
     st.success(f"💰 신규 자금 배분 (${new_cash:,.2f})")
     
-    st.write("**매수 계획:**")
-    st.write(f"• QQQM 70%: ${new_cash * 0.70:,.2f} (약 {(new_cash * 0.70 / qqqm_data['price']):.1f}주)")
-    st.write(f"• SCHD 15%: ${new_cash * 0.15:,.2f} (약 {(new_cash * 0.15 / schd_data['price']):.1f}주)")
-    st.write(f"• IAU 5%: ${new_cash * 0.05:,.2f} (약 {(new_cash * 0.05 / iau_data['price']):.1f}주)")
-    st.write(f"• SGOV 10%: ${new_cash * 0.10:,.2f}")
+    st.write("**매수 계획 (실행 가능한 주식 수):**")
+    st.write(f"• **QQQM: {normal_qqqm_shares}주** = ${normal_qqqm_value:,.2f}")
+    st.write(f"• **SCHD: {normal_schd_shares}주** = ${normal_schd_value:,.2f}")
+    st.write(f"• **IAU: {normal_iau_shares}주** = ${normal_iau_value:,.2f}")
+    st.write(f"• **SGOV: ${normal_sgov_value:,.2f}**")
+    
+    normal_total_use = normal_qqqm_value + normal_schd_value + normal_iau_value + normal_sgov_value
+    normal_remaining = new_cash - normal_total_use
+    st.caption(f"💡 실제 사용: ${normal_total_use:,.2f} | 잔액: ${normal_remaining:,.2f}")
     
     st.info(f"""💡 **투자 후 예상 비중**  
-    QQQM: {((qqqm_value + new_cash * 0.70) / (total_value + new_cash) * 100):.1f}% | 
-    SCHD: {((schd_value + new_cash * 0.15) / (total_value + new_cash) * 100):.1f}% | 
-    IAU: {((iau_value + new_cash * 0.05) / (total_value + new_cash) * 100):.1f}%""")
+    QQQM: {((qqqm_value + normal_qqqm_value) / (total_value + normal_total_use) * 100):.1f}% | 
+    SCHD: {((schd_value + normal_schd_value) / (total_value + normal_total_use) * 100):.1f}% | 
+    IAU: {((iau_value + normal_iau_value) / (total_value + normal_total_use) * 100):.1f}%""")
 
 # 정상 상황: 신규 자금 없음
 else:

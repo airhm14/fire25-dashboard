@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 import requests
 from bs4 import BeautifulSoup
@@ -155,8 +155,12 @@ st.markdown("""
 # =====================================================================
 # 제목
 # =====================================================================
+# 한국 시간대 (UTC+9)
+kst = timezone(timedelta(hours=9))
+current_time_kst = datetime.now(kst).strftime('%Y-%m-%d %H:%M:%S KST')
+
 st.markdown("<h1 style='text-align: center;'>🛡️ TEAM FIRE 25 작전 통제실</h1>", unsafe_allow_html=True)
-st.markdown(f"<p style='text-align: center; color: #94a3b8;'>마지막 업데이트: {datetime.now().strftime('%Y-%m-%d %H:%M:%S KST')}</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='text-align: center; color: #94a3b8;'>마지막 업데이트: {current_time_kst}</p>", unsafe_allow_html=True)
 st.markdown("---")
 
 # =====================================================================
@@ -248,46 +252,62 @@ with st.sidebar:
 @st.cache_data(ttl=60)  # 60초 캐시
 def get_stock_data(symbol, period="3mo"):
     """주식 데이터 가져오기 (가격 + 기술적 지표)"""
-    try:
-        ticker = yf.Ticker(symbol)
-        df = ticker.history(period=period)
-        
-        if df.empty:
-            return None
-        
-        # 이동평균선 계산
-        df['SMA_20'] = df['Close'].rolling(window=20).mean()
-        df['SMA_50'] = df['Close'].rolling(window=50).mean()
-        df['SMA_200'] = df['Close'].rolling(window=200).mean()
-        
-        # RSI 계산
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        df['RSI'] = 100 - (100 / (1 + rs))
-        
-        # 최신 데이터
-        latest = df.iloc[-1]
-        prev_close = df.iloc[-2]['Close'] if len(df) > 1 else latest['Close']
-        
-        return {
-            'symbol': symbol,
-            'price': latest['Close'],
-            'prev_close': prev_close,
-            'change': latest['Close'] - prev_close,
-            'change_pct': ((latest['Close'] - prev_close) / prev_close) * 100,
-            'sma_20': latest['SMA_20'],
-            'sma_50': latest['SMA_50'],
-            'sma_200': latest['SMA_200'],
-            'rsi': latest['RSI'],
-            'volume': latest['Volume'],
-            'timestamp': latest.name,
-            'df': df
-        }
-    except Exception as e:
-        st.error(f"❌ {symbol} 데이터 가져오기 실패: {str(e)}")
-        return None
+    import time
+    
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                time.sleep(retry_delay * attempt)
+                
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(period=period)
+            
+            if df.empty:
+                if attempt < max_retries - 1:
+                    continue
+                return None
+            
+            # 이동평균선 계산
+            df['SMA_20'] = df['Close'].rolling(window=20).mean()
+            df['SMA_50'] = df['Close'].rolling(window=50).mean()
+            df['SMA_200'] = df['Close'].rolling(window=200).mean()
+            
+            # RSI 계산
+            delta = df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            df['RSI'] = 100 - (100 / (1 + rs))
+            
+            # 최신 데이터
+            latest = df.iloc[-1]
+            prev_close = df.iloc[-2]['Close'] if len(df) > 1 else latest['Close']
+            
+            return {
+                'symbol': symbol,
+                'price': latest['Close'],
+                'prev_close': prev_close,
+                'change': latest['Close'] - prev_close,
+                'change_pct': ((latest['Close'] - prev_close) / prev_close) * 100,
+                'sma_20': latest['SMA_20'],
+                'sma_50': latest['SMA_50'],
+                'sma_200': latest['SMA_200'],
+                'rsi': latest['RSI'],
+                'volume': latest['Volume'],
+                'timestamp': latest.name,
+                'df': df
+            }
+        except Exception as e:
+            if attempt < max_retries - 1:
+                continue
+            else:
+                st.error(f"❌ {symbol} 데이터 가져오기 실패: {str(e)}")
+                return None
+    
+    return None
 
 # =====================================================================
 # 데이터 로딩

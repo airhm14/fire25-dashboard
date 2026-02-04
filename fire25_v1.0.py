@@ -797,16 +797,30 @@ elif is_puddle:
     injection_new = new_cash
     total_injection = injection_sgov + injection_deposit + injection_new
     
+    # SGOV 주가 정보 가져오기
+    try:
+        sgov_ticker = yf.Ticker("SGOV")
+        sgov_price = sgov_ticker.history(period='1d')['Close'].iloc[-1]
+        sgov_shares_total = sgov_value / sgov_price if sgov_price > 0 else 0
+        sgov_shares_to_sell = injection_sgov / sgov_price if sgov_price > 0 else 0
+    except:
+        sgov_price = 93.5  # 대략적인 SGOV 가격
+        sgov_shares_total = sgov_value / sgov_price
+        sgov_shares_to_sell = injection_sgov / sgov_price
+    
     # 투입 가능 자금 표시
     st.success("💰 투입 가능 자금")
     
     st.write("**자금 구성:**")
-    st.write(f"• SGOV 30%: ${injection_sgov:,.2f}")
+    st.write(f"• SGOV 보유: ${sgov_value:,.2f} (약 {sgov_shares_total:.1f}주 @ ${sgov_price:.2f})")
+    st.write(f"  └─ 최소 유지 (7%): ${sgov_minimum:,.2f}")
+    st.write(f"  └─ 사용 가능: ${available_sgov:,.2f}")
+    st.write(f"• **SGOV 30% 매도: {sgov_shares_to_sell:.1f}주 = ${injection_sgov:,.2f}**")
     st.write(f"• 예수금 전액: ${injection_deposit:,.2f}")
     if has_new_cash:
         st.write(f"• 신규 자금: ${injection_new:,.2f}")
     st.markdown("---")
-    st.write(f"**총 투입: :green[${total_injection:,.2f}]**")
+    st.write(f"**총 투입 가능: :green[${total_injection:,.2f}]**")
     
     st.markdown("")
     st.info("📊 매수 전략")

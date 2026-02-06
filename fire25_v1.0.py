@@ -1348,212 +1348,318 @@ st.markdown("---")
 st.header("📊 오늘의 시장 동향")
 
 @st.cache_data(ttl=1800)  # 30분 캐시
-def get_market_summary(symbol, name):
-    """Yahoo Finance에서 종목 관련 뉴스 요약 가져오기"""
+def get_market_summary(symbol):
+    """Yahoo Finance에서 종목 관련 뉴스 가져오기"""
     try:
         ticker = yf.Ticker(symbol)
         news = ticker.news
         
         if news and len(news) > 0:
-            # 최신 뉴스 3개 제목 가져오기
-            titles = [item.get('title', '') for item in news[:3] if item.get('title')]
-            return titles
+            # 최신 뉴스 5개 가져오기
+            news_list = []
+            for item in news[:5]:
+                if item.get('title'):
+                    news_list.append({
+                        'title': item.get('title', ''),
+                        'publisher': item.get('publisher', ''),
+                        'link': item.get('link', '#')
+                    })
+            return news_list
         return []
     except:
         return []
 
-def analyze_movement(change_pct, titles):
-    """등락 원인 분석 (키워드 기반)"""
+def analyze_market_sentiment(change_pct, news_list):
+    """시장 심리 및 원인 상세 분석"""
     
-    # 키워드 매핑
-    keywords_positive = {
-        'surge': '급등', 'jump': '상승', 'gain': '상승', 'rise': '상승', 
-        'rally': '랠리', 'high': '고점', 'record': '신기록', 'beat': '예상 상회',
-        'strong': '강세', 'boost': '상승', 'climb': '상승', 'soar': '급등',
-        'optimism': '낙관론', 'bullish': '강세', 'buy': '매수세',
-        'earnings': '실적', 'profit': '수익', 'growth': '성장',
-        'fed': '연준', 'rate cut': '금리 인하', 'dovish': '비둘기파',
-        'ai': 'AI', 'tech': '기술주', 'nvidia': '엔비디아', 'apple': '애플',
-        'microsoft': '마이크로소프트', 'amazon': '아마존', 'google': '구글'
+    # 상세 키워드 카테고리
+    keyword_categories = {
+        '연준/금리': {
+            'keywords': ['fed', 'federal reserve', 'rate', 'rates', 'interest', 'powell', 'fomc', 'cut', 'hike', 'dovish', 'hawkish', 'monetary'],
+            'positive': ['cut', 'dovish', 'lower'],
+            'negative': ['hike', 'hawkish', 'higher', 'raise']
+        },
+        '실적/기업': {
+            'keywords': ['earnings', 'revenue', 'profit', 'guidance', 'beat', 'miss', 'outlook', 'forecast', 'results'],
+            'positive': ['beat', 'strong', 'surge', 'record', 'exceeded'],
+            'negative': ['miss', 'weak', 'disappoint', 'below', 'cut']
+        },
+        'AI/기술': {
+            'keywords': ['ai', 'artificial intelligence', 'nvidia', 'chip', 'semiconductor', 'tech', 'apple', 'microsoft', 'google', 'amazon', 'meta', 'tesla'],
+            'positive': ['surge', 'boom', 'growth', 'demand', 'breakthrough'],
+            'negative': ['concern', 'bubble', 'overvalued', 'decline']
+        },
+        '인플레이션': {
+            'keywords': ['inflation', 'cpi', 'pce', 'price', 'consumer'],
+            'positive': ['cool', 'ease', 'slow', 'lower', 'decline'],
+            'negative': ['rise', 'hot', 'sticky', 'higher', 'surge']
+        },
+        '지정학/무역': {
+            'keywords': ['tariff', 'china', 'trade', 'war', 'geopolitical', 'russia', 'ukraine', 'sanction', 'tension'],
+            'positive': ['deal', 'ease', 'resolve', 'agreement'],
+            'negative': ['tension', 'escalate', 'threat', 'risk', 'war']
+        },
+        '경기/고용': {
+            'keywords': ['job', 'employment', 'gdp', 'economy', 'recession', 'growth', 'labor', 'unemployment', 'payroll'],
+            'positive': ['strong', 'growth', 'add', 'robust', 'resilient'],
+            'negative': ['weak', 'slow', 'recession', 'layoff', 'decline']
+        },
+        '금/안전자산': {
+            'keywords': ['gold', 'silver', 'safe haven', 'treasury', 'bond', 'yield', 'dollar'],
+            'positive': ['rally', 'surge', 'demand', 'rise'],
+            'negative': ['fall', 'drop', 'decline', 'sell']
+        },
+        '시장심리': {
+            'keywords': ['rally', 'selloff', 'bull', 'bear', 'volatility', 'vix', 'fear', 'optimism', 'sentiment'],
+            'positive': ['rally', 'bull', 'optimism', 'confidence', 'buy'],
+            'negative': ['selloff', 'bear', 'fear', 'panic', 'sell', 'crash']
+        }
     }
     
-    keywords_negative = {
-        'fall': '하락', 'drop': '하락', 'decline': '하락', 'slide': '하락',
-        'plunge': '급락', 'tumble': '폭락', 'crash': '폭락', 'sink': '급락',
-        'low': '저점', 'selloff': '매도세', 'sell-off': '매도세',
-        'fear': '공포', 'worry': '우려', 'concern': '우려', 'risk': '리스크',
-        'warning': '경고', 'weak': '약세', 'bearish': '약세',
-        'inflation': '인플레이션', 'rate hike': '금리 인상', 'hawkish': '매파',
-        'tariff': '관세', 'trade war': '무역전쟁', 'recession': '경기침체',
-        'geopolitical': '지정학', 'uncertainty': '불확실성'
-    }
+    all_titles = ' '.join([n['title'] for n in news_list]).lower() if news_list else ''
     
-    keywords_neutral = {
-        'mixed': '혼조', 'flat': '보합', 'steady': '안정', 'unchanged': '변동 없음',
-        'wait': '관망', 'hold': '유지', 'pause': '일시 중단'
-    }
+    detected_factors = []
     
-    found_keywords = []
-    all_titles = ' '.join(titles).lower()
-    
-    # 등락 방향에 따라 키워드 우선순위 결정
-    if change_pct > 0.5:
-        primary_keywords = keywords_positive
-        secondary_keywords = keywords_neutral
-    elif change_pct < -0.5:
-        primary_keywords = keywords_negative
-        secondary_keywords = keywords_neutral
-    else:
-        primary_keywords = keywords_neutral
-        secondary_keywords = keywords_positive if change_pct > 0 else keywords_negative
-    
-    # 1차 키워드 검색
-    for eng, kor in primary_keywords.items():
-        if eng in all_titles and kor not in found_keywords:
-            found_keywords.append(kor)
-            if len(found_keywords) >= 3:
+    for category, data in keyword_categories.items():
+        # 카테고리 키워드 검색
+        category_found = False
+        for kw in data['keywords']:
+            if kw in all_titles:
+                category_found = True
                 break
-    
-    # 부족하면 2차 키워드 검색
-    if len(found_keywords) < 2:
-        for eng, kor in secondary_keywords.items():
-            if eng in all_titles and kor not in found_keywords:
-                found_keywords.append(kor)
-                if len(found_keywords) >= 3:
+        
+        if category_found:
+            # 긍정/부정 판단
+            sentiment = 'neutral'
+            for pos_kw in data['positive']:
+                if pos_kw in all_titles:
+                    sentiment = 'positive'
                     break
+            if sentiment == 'neutral':
+                for neg_kw in data['negative']:
+                    if neg_kw in all_titles:
+                        sentiment = 'negative'
+                        break
+            
+            detected_factors.append({
+                'category': category,
+                'sentiment': sentiment
+            })
     
-    return found_keywords
+    return detected_factors
 
-def get_movement_reason(symbol, name, change_pct):
-    """종목별 등락 원인 요약"""
-    titles = get_market_summary(symbol, name)
+def get_market_interpretation(symbol, name, change_pct, news_list):
+    """종합적인 시장 해석 생성"""
     
-    if not titles:
-        if change_pct > 0.5:
-            return "시장 전반적 강세"
-        elif change_pct < -0.5:
-            return "시장 전반적 약세"
-        else:
-            return "뚜렷한 방향성 없음"
+    factors = analyze_market_sentiment(change_pct, news_list)
     
-    keywords = analyze_movement(change_pct, titles)
-    
-    if keywords:
-        return ' / '.join(keywords)
+    # 등락 방향
+    if change_pct > 1.0:
+        direction = "강세"
+        direction_detail = "큰 폭 상승"
+    elif change_pct > 0.3:
+        direction = "상승"
+        direction_detail = "소폭 상승"
+    elif change_pct > -0.3:
+        direction = "보합"
+        direction_detail = "변동 제한적"
+    elif change_pct > -1.0:
+        direction = "하락"
+        direction_detail = "소폭 하락"
     else:
+        direction = "약세"
+        direction_detail = "큰 폭 하락"
+    
+    # 주요 요인 정리
+    main_factors = []
+    for f in factors[:3]:  # 최대 3개
+        sentiment_icon = "🔺" if f['sentiment'] == 'positive' else ("🔻" if f['sentiment'] == 'negative' else "➖")
+        main_factors.append(f"{sentiment_icon} {f['category']}")
+    
+    # 기본 해석 (요인 없을 때)
+    if not main_factors:
         if change_pct > 0.5:
-            return "기술적 반등 또는 시장 강세"
+            main_factors = ["🔺 시장 전반 강세", "🔺 매수세 유입"]
         elif change_pct < -0.5:
-            return "차익실현 또는 시장 약세"
+            main_factors = ["🔻 시장 전반 약세", "🔻 차익실현 매물"]
         else:
-            return "관망세 지속"
+            main_factors = ["➖ 뚜렷한 방향성 없음", "➖ 관망세 지속"]
+    
+    return {
+        'direction': direction,
+        'direction_detail': direction_detail,
+        'factors': main_factors,
+        'news': news_list[:2] if news_list else []  # 상위 2개 뉴스
+    }
 
-# 등락 원인 분석 실행
+# 데이터 수집
 with st.spinner('📡 시장 동향 분석 중...'):
-    qqqm_reason = get_movement_reason('QQQM', 'QQQM', qqqm_data['change_pct'])
-    schd_reason = get_movement_reason('SCHD', 'SCHD', schd_data['change_pct'])
-    iau_reason = get_movement_reason('IAU', 'IAU', iau_data['change_pct'])
+    qqqm_news = get_market_summary('QQQM')
+    schd_news = get_market_summary('SCHD')
+    iau_news = get_market_summary('IAU')
     
-    # VIX는 방향 해석이 반대
-    if vix_data:
-        vix_reason = get_movement_reason('^VIX', 'VIX', vix_data['change_pct'])
-    else:
-        vix_reason = "데이터 없음"
+    qqqm_analysis = get_market_interpretation('QQQM', '나스닥 100', qqqm_data['change_pct'], qqqm_news)
+    schd_analysis = get_market_interpretation('SCHD', '배당주', schd_data['change_pct'], schd_news)
+    iau_analysis = get_market_interpretation('IAU', '금', iau_data['change_pct'], iau_news)
 
-# 결과 표시
-col1, col2 = st.columns(2)
-
-with col1:
-    # QQQM
-    qqqm_color = "#ef4444" if qqqm_data['change_pct'] >= 0 else "#3b82f6"
-    qqqm_icon = "📈" if qqqm_data['change_pct'] >= 0 else "📉"
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%); 
-                border: 1px solid #10b981; border-radius: 12px; padding: 20px; margin: 10px 0;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-size: 1.2em; font-weight: 700; color: #10b981;">🟢 QQQM (나스닥)</span>
-            <span style="font-size: 1.1em; font-weight: 700; color: {qqqm_color};">{qqqm_icon} {qqqm_data['change_pct']:+.2f}%</span>
-        </div>
-        <p style="color: #e2e8f0; margin: 0; font-size: 1em;">💡 {qqqm_reason}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # IAU
-    iau_color = "#ef4444" if iau_data['change_pct'] >= 0 else "#3b82f6"
-    iau_icon = "📈" if iau_data['change_pct'] >= 0 else "📉"
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(251, 191, 36, 0.05) 100%); 
-                border: 1px solid #fbbf24; border-radius: 12px; padding: 20px; margin: 10px 0;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-size: 1.2em; font-weight: 700; color: #fbbf24;">🟡 IAU (금)</span>
-            <span style="font-size: 1.1em; font-weight: 700; color: {iau_color};">{iau_icon} {iau_data['change_pct']:+.2f}%</span>
-        </div>
-        <p style="color: #e2e8f0; margin: 0; font-size: 1em;">💡 {iau_reason}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col2:
-    # SCHD
-    schd_color = "#ef4444" if schd_data['change_pct'] >= 0 else "#3b82f6"
-    schd_icon = "📈" if schd_data['change_pct'] >= 0 else "📉"
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%); 
-                border: 1px solid #3b82f6; border-radius: 12px; padding: 20px; margin: 10px 0;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <span style="font-size: 1.2em; font-weight: 700; color: #3b82f6;">🔵 SCHD (배당)</span>
-            <span style="font-size: 1.1em; font-weight: 700; color: {schd_color};">{schd_icon} {schd_data['change_pct']:+.2f}%</span>
-        </div>
-        <p style="color: #e2e8f0; margin: 0; font-size: 1em;">💡 {schd_reason}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # VIX
-    if vix_data:
-        # VIX는 상승이 부정적, 하락이 긍정적
-        vix_color = "#3b82f6" if vix_data['change_pct'] >= 0 else "#ef4444"
-        vix_icon = "⚠️" if vix_data['change_pct'] >= 0 else "✅"
-        vix_status = "변동성 증가" if vix_data['change_pct'] >= 0 else "변동성 감소"
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(239, 68, 68, 0.05) 100%); 
-                    border: 1px solid #ef4444; border-radius: 12px; padding: 20px; margin: 10px 0;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <span style="font-size: 1.2em; font-weight: 700; color: #ef4444;">🔴 VIX (공포지수)</span>
-                <span style="font-size: 1.1em; font-weight: 700; color: {vix_color};">{vix_icon} {vix_data['change_pct']:+.2f}%</span>
-            </div>
-            <p style="color: #e2e8f0; margin: 0; font-size: 1em;">💡 {vix_status} - {vix_reason}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-# 포트폴리오 전체 요약
-st.markdown("<br>", unsafe_allow_html=True)
-
-# 전체 포트폴리오 등락률 계산
+# =====================================================================
+# 포트폴리오 요약 (상단에 배치)
+# =====================================================================
 portfolio_change = (
     (qqqm_data['change_pct'] * 0.70) + 
     (schd_data['change_pct'] * 0.15) + 
     (iau_data['change_pct'] * 0.05)
 )
-
-portfolio_color = "#ef4444" if portfolio_change >= 0 else "#3b82f6"
-portfolio_icon = "📈" if portfolio_change >= 0 else "📉"
-
-# 오늘 포트폴리오 손익 계산
 portfolio_daily_change = total_value * (portfolio_change / 100)
 
+# 색상 결정 (한국식: 상승=빨강, 하락=파랑)
+port_color = "#ef4444" if portfolio_change >= 0 else "#3b82f6"
+port_bg = "rgba(239, 68, 68, 0.1)" if portfolio_change >= 0 else "rgba(59, 130, 246, 0.1)"
+port_icon = "📈" if portfolio_change >= 0 else "📉"
+
 st.markdown(f"""
-<div style="background: linear-gradient(135deg, rgba(148, 163, 184, 0.1) 0%, rgba(148, 163, 184, 0.05) 100%); 
-            border: 2px solid #94a3b8; border-radius: 12px; padding: 25px; margin: 15px 0;">
-    <div style="text-align: center;">
-        <p style="font-size: 1em; color: #94a3b8; margin-bottom: 10px;">오늘의 포트폴리오 변동 (가중평균)</p>
-        <p style="font-size: 2em; font-weight: 700; color: {portfolio_color}; margin: 10px 0;">
-            {portfolio_icon} {portfolio_change:+.2f}%
-        </p>
-        <p style="font-size: 1.2em; color: {portfolio_color}; margin: 0;">
-            {'+' if portfolio_daily_change >= 0 else ''}${portfolio_daily_change:,.2f}
+<div style="background: {port_bg}; border: 2px solid {port_color}; border-radius: 16px; padding: 25px; margin-bottom: 30px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+        <div>
+            <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">오늘의 포트폴리오</p>
+            <p style="color: {port_color}; font-size: 2.5em; font-weight: 800; margin: 5px 0;">
+                {port_icon} {portfolio_change:+.2f}%
+            </p>
+        </div>
+        <div style="text-align: right;">
+            <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">예상 손익</p>
+            <p style="color: {port_color}; font-size: 2em; font-weight: 700; margin: 5px 0;">
+                {'+' if portfolio_daily_change >= 0 else ''}${portfolio_daily_change:,.0f}
+            </p>
+        </div>
+    </div>
+    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
+        <p style="color: #cbd5e1; font-size: 0.9em; margin: 0;">
+            QQQM {qqqm_data['change_pct']:+.2f}% × 70% &nbsp;|&nbsp; 
+            SCHD {schd_data['change_pct']:+.2f}% × 15% &nbsp;|&nbsp; 
+            IAU {iau_data['change_pct']:+.2f}% × 5%
         </p>
     </div>
 </div>
 """, unsafe_allow_html=True)
+
+# =====================================================================
+# 종목별 상세 분석
+# =====================================================================
+st.subheader("📈 종목별 상세 분석")
+
+# QQQM 분석
+qqqm_color = "#ef4444" if qqqm_data['change_pct'] >= 0 else "#3b82f6"
+qqqm_icon = "📈" if qqqm_data['change_pct'] >= 0 else "📉"
+
+with st.expander(f"🟢 **QQQM (나스닥 100)** — {qqqm_icon} {qqqm_data['change_pct']:+.2f}% (${qqqm_data['price']:.2f})", expanded=True):
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.markdown(f"""
+        <div style="text-align: center; padding: 15px; background: rgba(16, 185, 129, 0.1); border-radius: 12px;">
+            <p style="color: #10b981; font-size: 0.9em; margin: 0;">오늘의 방향</p>
+            <p style="color: {qqqm_color}; font-size: 1.8em; font-weight: 700; margin: 5px 0;">{qqqm_analysis['direction']}</p>
+            <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">{qqqm_analysis['direction_detail']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("**📌 주요 영향 요인**")
+        for factor in qqqm_analysis['factors']:
+            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;{factor}")
+        
+        if qqqm_analysis['news']:
+            st.markdown("**📰 관련 뉴스**")
+            for news in qqqm_analysis['news']:
+                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;• [{news['title'][:50]}...]({news['link']})")
+
+# SCHD 분석
+schd_color = "#ef4444" if schd_data['change_pct'] >= 0 else "#3b82f6"
+schd_icon = "📈" if schd_data['change_pct'] >= 0 else "📉"
+
+with st.expander(f"🔵 **SCHD (배당 성장)** — {schd_icon} {schd_data['change_pct']:+.2f}% (${schd_data['price']:.2f})", expanded=True):
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.markdown(f"""
+        <div style="text-align: center; padding: 15px; background: rgba(59, 130, 246, 0.1); border-radius: 12px;">
+            <p style="color: #3b82f6; font-size: 0.9em; margin: 0;">오늘의 방향</p>
+            <p style="color: {schd_color}; font-size: 1.8em; font-weight: 700; margin: 5px 0;">{schd_analysis['direction']}</p>
+            <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">{schd_analysis['direction_detail']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("**📌 주요 영향 요인**")
+        for factor in schd_analysis['factors']:
+            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;{factor}")
+        
+        if schd_analysis['news']:
+            st.markdown("**📰 관련 뉴스**")
+            for news in schd_analysis['news']:
+                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;• [{news['title'][:50]}...]({news['link']})")
+
+# IAU 분석
+iau_color = "#ef4444" if iau_data['change_pct'] >= 0 else "#3b82f6"
+iau_icon = "📈" if iau_data['change_pct'] >= 0 else "📉"
+
+with st.expander(f"🟡 **IAU (금)** — {iau_icon} {iau_data['change_pct']:+.2f}% (${iau_data['price']:.2f})", expanded=True):
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.markdown(f"""
+        <div style="text-align: center; padding: 15px; background: rgba(251, 191, 36, 0.1); border-radius: 12px;">
+            <p style="color: #fbbf24; font-size: 0.9em; margin: 0;">오늘의 방향</p>
+            <p style="color: {iau_color}; font-size: 1.8em; font-weight: 700; margin: 5px 0;">{iau_analysis['direction']}</p>
+            <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">{iau_analysis['direction_detail']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("**📌 주요 영향 요인**")
+        for factor in iau_analysis['factors']:
+            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;{factor}")
+        
+        if iau_analysis['news']:
+            st.markdown("**📰 관련 뉴스**")
+            for news in iau_analysis['news']:
+                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;• [{news['title'][:50]}...]({news['link']})")
+
+# VIX 분석
+if vix_data:
+    vix_color = "#3b82f6" if vix_data['change_pct'] >= 0 else "#10b981"
+    vix_icon = "⚠️" if vix_data['change_pct'] >= 0 else "✅"
+    vix_status = "변동성 증가 (주의)" if vix_data['change_pct'] >= 0 else "변동성 감소 (안정)"
+    
+    with st.expander(f"🔴 **VIX (공포지수)** — {vix_icon} {vix_data['change_pct']:+.2f}% ({vix_data['price']:.2f})", expanded=False):
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.markdown(f"""
+            <div style="text-align: center; padding: 15px; background: rgba(239, 68, 68, 0.1); border-radius: 12px;">
+                <p style="color: #ef4444; font-size: 0.9em; margin: 0;">시장 변동성</p>
+                <p style="color: {vix_color}; font-size: 1.5em; font-weight: 700; margin: 5px 0;">{vix_status.split('(')[0].strip()}</p>
+                <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">VIX {vix_data['price']:.1f}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown("**📌 VIX 해석**")
+            if vix_data['price'] <= 14:
+                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;🔻 매우 낮음 - 시장 안정 (DEFCON 조건)")
+            elif vix_data['price'] <= 20:
+                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;➖ 정상 범위 - 일반적인 변동성")
+            elif vix_data['price'] <= 30:
+                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;🔺 높음 - 불안정한 시장")
+            else:
+                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;🔺 매우 높음 - 극심한 공포")
+            
+            st.markdown("**📌 투자 시사점**")
+            if vix_data['change_pct'] >= 0:
+                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;⚠️ 변동성 증가 중 - 신중한 접근 권장")
+            else:
+                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;✅ 변동성 감소 중 - 시장 안정화 신호")
 
 st.markdown("---")
 st.markdown("""

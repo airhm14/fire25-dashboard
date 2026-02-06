@@ -452,8 +452,35 @@ if puddle_stage == 0:
         puddle_stage = 1  # 50일선 하향돌파
         puddle_alert = True
 
-# 리밸런싱 체크
-rebalancing_needed = qqqm_pct > 75
+# Smart Shoulder 발동 조건 체크 (V5.8: 3가지 모두 충족 시)
+# 1. QQQM 비중 > 75%
+# 2. QQQM 현재가 < 20일 이동평균선 (하향돌파)
+# 3. 최근 전고점 갱신 후 (상승장 이후)
+
+# 조건 1: QQQM 비중 > 75%
+condition_1_over_75 = qqqm_pct > 75
+
+# 조건 2: QQQM 현재가 < 20일선
+condition_2_below_sma20 = False
+if pd.notna(qqqm_data['sma_20']):
+    condition_2_below_sma20 = qqqm_data['price'] < qqqm_data['sma_20']
+
+# 조건 3: 최근 전고점 갱신 후 (최근 20일 내 52주 신고가 달성 여부)
+condition_3_after_high = False
+if len(qqqm_data['df']) >= 252:  # 1년 데이터 필요
+    # 최근 52주(252거래일) 최고가
+    high_52w = qqqm_data['df']['High'].tail(252).max()
+    # 최근 20일 내에 52주 신고가를 달성했는지 확인
+    recent_20d_high = qqqm_data['df']['High'].tail(20).max()
+    # 최근 20일 고점이 52주 고점의 99% 이상이면 "전고점 갱신 후"로 판단
+    if recent_20d_high >= high_52w * 0.99:
+        condition_3_after_high = True
+
+# Smart Shoulder 발동 여부 (3가지 모두 충족)
+smart_shoulder_triggered = condition_1_over_75 and condition_2_below_sma20 and condition_3_after_high
+
+# 단순 리밸런싱 필요 여부 (비중만 초과, Smart Shoulder 조건 미충족)
+rebalancing_needed = condition_1_over_75 and not smart_shoulder_triggered
 
 # 경고 표시
 if defcon_triggered:
@@ -508,10 +535,29 @@ if rebalancing_needed:
     excess = qqqm_pct - 70
     st.markdown(f"""
     <div class="info-box">
-        <div class="warning-title">⚠️ 리밸런싱 필요</div>
+        <div class="warning-title">⚠️ QQQM 비중 초과 (75% 이상)</div>
         <p><strong>QQQM 현재 비중:</strong> {qqqm_pct:.2f}% (목표: 70%)</p>
         <p><strong>초과:</strong> +{excess:.2f}%p</p>
-        <p><strong>조치:</strong> Smart Shoulder 프로토콜 대기 또는 수동 조정</p>
+        <p><strong>20일선 상태:</strong> {'❌ 하향돌파' if condition_2_below_sma20 else '✅ 20일선 위'}</p>
+        <p><strong>전고점 상태:</strong> {'⚠️ 최근 신고가 갱신' if condition_3_after_high else '✅ 신고가 미갱신'}</p>
+        <hr style="border-color: rgba(251, 191, 36, 0.3); margin: 10px 0;">
+        <p style="color: #10b981;"><strong>📋 현재 조치:</strong> 상승장 중이므로 Smart Shoulder 대기</p>
+        <p style="color: #94a3b8; font-size: 0.9em;">💡 20일선 하향돌파 + 전고점 갱신 후에만 리밸런싱 실행</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+if smart_shoulder_triggered:
+    excess = qqqm_pct - 70
+    st.markdown(f"""
+    <div class="warning-box">
+        <div class="warning-title">🚨 Smart Shoulder 발동!</div>
+        <p><strong>QQQM 현재 비중:</strong> {qqqm_pct:.2f}% (목표: 70%)</p>
+        <p><strong>초과:</strong> +{excess:.2f}%p</p>
+        <p>✅ 조건 1: QQQM > 75% 충족</p>
+        <p>✅ 조건 2: 20일선 하향돌파 (${qqqm_data['sma_20']:.2f})</p>
+        <p>✅ 조건 3: 최근 전고점 갱신 후</p>
+        <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 10px 0;">
+        <p style="color: #ef4444;"><strong>📋 조치:</strong> 즉시 QQQM 매도 → SCHD/IAU/SGOV 재배분</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -868,7 +914,8 @@ st.markdown("""
 is_puddle = puddle_alert  # 웅덩이 발생
 is_defcon = defcon_triggered  # Defcon 발동
 has_new_cash = new_cash > 0  # 신규 자금
-needs_rebalancing = qqqm_pct > 75  # Smart Shoulder
+is_smart_shoulder = smart_shoulder_triggered  # Smart Shoulder 발동 (V5.8: 3가지 조건 모두 충족)
+is_over_75 = condition_1_over_75  # QQQM 비중만 75% 초과 (Smart Shoulder 미발동)
 
 # 매매 계획 생성
 st.subheader("🎯 현재 상황 진단")
@@ -880,8 +927,10 @@ if is_puddle:
     stage_colors = {1: "#fbbf24", 2: "#f97316", 3: "#ef4444", 4: "#10b981"}
     stage_names = {1: "1단계(50일선)", 2: "2단계(100일선)", 3: "3단계(200일선↓)", 4: "4단계(200일선↑)"}
     situation_badges.append(f"🚨 <span style='background: {stage_colors[puddle_stage]}; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>웅덩이 {stage_names[puddle_stage]}</span>")
-if needs_rebalancing:
-    situation_badges.append("⚠️ <span style='background: #fbbf24; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>리밸런싱 필요</span>")
+if is_smart_shoulder:
+    situation_badges.append("🚨 <span style='background: #ef4444; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>Smart Shoulder 발동</span>")
+elif is_over_75:
+    situation_badges.append("⚠️ <span style='background: #fbbf24; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>QQQM 75%↑ (대기)</span>")
 if has_new_cash:
     situation_badges.append("💰 <span style='background: #3b82f6; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>신규 자금 ${:,.0f}</span>".format(new_cash))
 
@@ -1073,67 +1122,166 @@ elif is_puddle:
     if puddle_stage < 4:
         st.caption(f"💡 다음 단계 발생 시 이 금액 기준으로 추가 투입")
 
-# 우선순위 3: Smart Shoulder (리밸런싱)
-elif needs_rebalancing:
+# 우선순위 3: Smart Shoulder (V5.8: 3가지 조건 모두 충족 시)
+elif is_smart_shoulder:
     st.markdown("""
-    <div class="info-box">
-        <div class="warning-title">⚠️ 우선순위 1: Smart Shoulder 리밸런싱</div>
-        <p style="font-size: 1.1em; margin: 15px 0;"><strong>QQQM 비중 초과 (75% 돌파)</strong></p>
+    <div class="warning-box">
+        <div class="warning-title">🚨 우선순위 1: Smart Shoulder 발동!</div>
+        <p style="font-size: 1.1em; margin: 15px 0;"><strong>3가지 조건 모두 충족 (V5.8)</strong></p>
+        <p>✅ QQQM 비중 > 75%</p>
+        <p>✅ QQQM < 20일선 (하향돌파)</p>
+        <p>✅ 최근 전고점 갱신 후</p>
+        <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 10px 0;">
+        <p style="color: #ef4444;"><strong>📋 조치:</strong> 전체 자산을 목표 비중(70/15/5/10)으로 리밸런싱</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # 초과분 계산
     import math
     
-    excess_pct = qqqm_pct - 70
-    excess_value = total_value * (excess_pct / 100)
-    excess_qty = excess_value / qqqm_data['price']
+    # 목표 금액 계산 (신규 자금 포함)
+    total_with_new = total_value + new_cash
     
-    # 매도는 올림
-    excess_qty_int = math.ceil(excess_qty)
-    actual_sell_value = excess_qty_int * qqqm_data['price']
+    target_qqqm_value = total_with_new * 0.70
+    target_schd_value = total_with_new * 0.15
+    target_iau_value = total_with_new * 0.05
+    target_cash_value = total_with_new * 0.10
     
-    # 매수는 내림
-    schd_buy_shares = math.floor(actual_sell_value * 0.60 / schd_data['price'])
-    iau_buy_shares = math.floor(actual_sell_value * 0.20 / iau_data['price'])
-    sgov_buy_value = actual_sell_value * 0.20
+    # 현재 vs 목표 차이
+    diff_qqqm = target_qqqm_value - qqqm_value
+    diff_schd = target_schd_value - schd_value
+    diff_iau = target_iau_value - iau_value
+    diff_cash = target_cash_value - total_cash
     
-    # 실제 매수 금액
-    schd_buy_value = schd_buy_shares * schd_data['price']
-    iau_buy_value = iau_buy_shares * iau_data['price']
+    st.subheader("📊 리밸런싱 계획")
     
-    st.error("🔴 매도 필요")
-    st.write(f"**QQQM 매도: {excess_qty_int}주** = ${actual_sell_value:,.2f}")
-    st.write(f"• 조정 후 비중: {qqqm_pct:.1f}% → 70%")
+    # 현재 상태
+    st.write("**현재 포트폴리오:**")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("QQQM", f"${qqqm_value:,.0f}", f"{qqqm_pct:.1f}%")
+    with col2:
+        st.metric("SCHD", f"${schd_value:,.0f}", f"{schd_pct:.1f}%")
+    with col3:
+        st.metric("IAU", f"${iau_value:,.0f}", f"{iau_pct:.1f}%")
+    with col4:
+        st.metric("현금", f"${total_cash:,.0f}", f"{cash_pct:.1f}%")
     
-    st.markdown("")
-    st.info("💰 매도 대금 재배분 (실행 가능한 주식 수)")
-    st.write(f"• **SCHD: {schd_buy_shares}주** = ${schd_buy_value:,.2f}")
-    st.write(f"• **IAU: {iau_buy_shares}주** = ${iau_buy_value:,.2f}")
-    st.write(f"• **SGOV: ${sgov_buy_value:,.2f}**")
+    if has_new_cash:
+        st.info(f"💰 신규 자금 포함: ${new_cash:,.2f} → 총 자산: ${total_with_new:,.2f}")
     
-    total_rebalance_use = schd_buy_value + iau_buy_value + sgov_buy_value
-    rebalance_remaining = actual_sell_value - total_rebalance_use
-    st.caption(f"💡 실제 사용: ${total_rebalance_use:,.2f} | 잔액: ${rebalance_remaining:,.2f}")
+    st.markdown("---")
+    
+    # 목표 상태
+    st.write("**목표 포트폴리오 (70/15/5/10):**")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("QQQM", f"${target_qqqm_value:,.0f}", "70%")
+    with col2:
+        st.metric("SCHD", f"${target_schd_value:,.0f}", "15%")
+    with col3:
+        st.metric("IAU", f"${target_iau_value:,.0f}", "5%")
+    with col4:
+        st.metric("현금", f"${target_cash_value:,.0f}", "10%")
+    
+    st.markdown("---")
+    
+    # 매매 계획
+    st.write("**📋 매매 실행 계획:**")
+    
+    # QQQM (매도 필요)
+    if diff_qqqm < 0:
+        qqqm_sell_shares = math.ceil(abs(diff_qqqm) / qqqm_data['price'])
+        qqqm_sell_value = qqqm_sell_shares * qqqm_data['price']
+        st.error(f"🔴 **QQQM 매도: {qqqm_sell_shares}주** = ${qqqm_sell_value:,.2f}")
+    else:
+        qqqm_buy_shares = math.floor(diff_qqqm / qqqm_data['price'])
+        if qqqm_buy_shares > 0:
+            qqqm_buy_value = qqqm_buy_shares * qqqm_data['price']
+            st.success(f"🟢 **QQQM 매수: {qqqm_buy_shares}주** = ${qqqm_buy_value:,.2f}")
+        else:
+            st.write("⚪ QQQM: 유지")
+    
+    # SCHD (매수 필요)
+    if diff_schd > 0:
+        schd_buy_shares = math.floor(diff_schd / schd_data['price'])
+        if schd_buy_shares > 0:
+            schd_buy_value = schd_buy_shares * schd_data['price']
+            st.success(f"🟢 **SCHD 매수: {schd_buy_shares}주** = ${schd_buy_value:,.2f}")
+        else:
+            st.write("⚪ SCHD: 유지")
+    else:
+        schd_sell_shares = math.ceil(abs(diff_schd) / schd_data['price'])
+        if schd_sell_shares > 0:
+            schd_sell_value = schd_sell_shares * schd_data['price']
+            st.error(f"🔴 **SCHD 매도: {schd_sell_shares}주** = ${schd_sell_value:,.2f}")
+        else:
+            st.write("⚪ SCHD: 유지")
+    
+    # IAU (매수 필요)
+    if diff_iau > 0:
+        iau_buy_shares = math.floor(diff_iau / iau_data['price'])
+        if iau_buy_shares > 0:
+            iau_buy_value = iau_buy_shares * iau_data['price']
+            st.success(f"🟢 **IAU 매수: {iau_buy_shares}주** = ${iau_buy_value:,.2f}")
+        else:
+            st.write("⚪ IAU: 유지")
+    else:
+        iau_sell_shares = math.ceil(abs(diff_iau) / iau_data['price'])
+        if iau_sell_shares > 0:
+            iau_sell_value = iau_sell_shares * iau_data['price']
+            st.error(f"🔴 **IAU 매도: {iau_sell_shares}주** = ${iau_sell_value:,.2f}")
+        else:
+            st.write("⚪ IAU: 유지")
+    
+    # 현금 (SGOV)
+    if diff_cash > 0:
+        st.success(f"🟢 **SGOV/현금 증가:** ${diff_cash:,.2f}")
+    elif diff_cash < 0:
+        sgov_sell_shares = math.ceil(abs(diff_cash) / sgov_price)
+        sgov_sell_value = sgov_sell_shares * sgov_price
+        st.error(f"🔴 **SGOV 매도: {sgov_sell_shares}주** = ${sgov_sell_value:,.2f}")
+    else:
+        st.write("⚪ 현금: 유지")
+    
+    st.markdown("---")
+    st.caption("💡 매도는 올림, 매수는 내림 적용 | 잔액은 예수금 보관")
+
+# QQQM 75% 초과하지만 Smart Shoulder 미발동 (상승장)
+elif is_over_75:
+    st.markdown("""
+    <div class="info-box">
+        <div class="warning-title">⚠️ QQQM 비중 초과 (상승장 대기)</div>
+        <p style="font-size: 1.1em; margin: 15px 0;"><strong>Smart Shoulder 조건 미충족</strong></p>
+        <p style="color: #10b981;">상승장에서는 75% 넘어도 OK! 하락 전환 시에만 조정</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.write(f"**현재 QQQM 비중:** {qqqm_pct:.1f}%")
+    st.write(f"**20일선 상태:** {'❌ 하향돌파' if condition_2_below_sma20 else '✅ 20일선 위 (${:.2f})'.format(qqqm_data['sma_20'])}")
+    st.write(f"**전고점 상태:** {'⚠️ 최근 신고가 갱신' if condition_3_after_high else '✅ 신고가 미갱신'}")
     
     if has_new_cash:
         st.markdown("")
-        st.warning(f"💰 신규 자금 배분 (${new_cash:,.2f})")
-        st.write("QQQM 비중이 높으므로 SCHD/IAU/SGOV 위주 배분")
+        st.success(f"💰 신규 자금 배분 - 평시 운영 (${new_cash:,.2f})")
+        st.write("Smart Shoulder 미발동 → 목표 비중대로 배분")
         
-        # 신규 자금도 내림 적용
-        new_schd_shares = math.floor(new_cash * 0.60 / schd_data['price'])
-        new_iau_shares = math.floor(new_cash * 0.20 / iau_data['price'])
-        new_sgov_value = new_cash * 0.20
+        import math
+        # 평시 비율 70/15/5/10
+        new_qqqm_shares = math.floor(new_cash * 0.70 / qqqm_data['price'])
+        new_schd_shares = math.floor(new_cash * 0.15 / schd_data['price'])
+        new_iau_shares = math.floor(new_cash * 0.05 / iau_data['price'])
+        new_sgov_value = new_cash * 0.10
         
+        new_qqqm_value = new_qqqm_shares * qqqm_data['price']
         new_schd_value = new_schd_shares * schd_data['price']
         new_iau_value = new_iau_shares * iau_data['price']
         
-        st.write(f"• **SCHD: {new_schd_shares}주** = ${new_schd_value:,.2f}")
-        st.write(f"• **IAU: {new_iau_shares}주** = ${new_iau_value:,.2f}")
-        st.write(f"• **SGOV: ${new_sgov_value:,.2f}**")
+        st.write(f"• **QQQM (70%): {new_qqqm_shares}주** = ${new_qqqm_value:,.2f}")
+        st.write(f"• **SCHD (15%): {new_schd_shares}주** = ${new_schd_value:,.2f}")
+        st.write(f"• **IAU (5%): {new_iau_shares}주** = ${new_iau_value:,.2f}")
+        st.write(f"• **SGOV (10%): ${new_sgov_value:,.2f}**")
         
-        new_total_use = new_schd_value + new_iau_value + new_sgov_value
+        new_total_use = new_qqqm_value + new_schd_value + new_iau_value + new_sgov_value
         new_remaining = new_cash - new_total_use
         st.caption(f"💡 실제 사용: ${new_total_use:,.2f} | 잔액: ${new_remaining:,.2f}")
 

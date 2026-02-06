@@ -1375,44 +1375,44 @@ def analyze_market_sentiment(change_pct, news_list):
     # 상세 키워드 카테고리
     keyword_categories = {
         '연준/금리': {
-            'keywords': ['fed', 'federal reserve', 'rate', 'rates', 'interest', 'powell', 'fomc', 'cut', 'hike', 'dovish', 'hawkish', 'monetary'],
-            'positive': ['cut', 'dovish', 'lower'],
-            'negative': ['hike', 'hawkish', 'higher', 'raise']
+            'keywords': ['fed', 'federal', 'reserve', 'rate', 'rates', 'interest', 'powell', 'fomc', 'cut', 'hike', 'dovish', 'hawkish', 'monetary', 'treasury', 'yield', 'bond'],
+            'positive': ['cut', 'dovish', 'lower', 'ease', 'pause'],
+            'negative': ['hike', 'hawkish', 'higher', 'raise', 'surge']
         },
         '실적/기업': {
-            'keywords': ['earnings', 'revenue', 'profit', 'guidance', 'beat', 'miss', 'outlook', 'forecast', 'results'],
-            'positive': ['beat', 'strong', 'surge', 'record', 'exceeded'],
-            'negative': ['miss', 'weak', 'disappoint', 'below', 'cut']
+            'keywords': ['earnings', 'revenue', 'profit', 'guidance', 'beat', 'miss', 'outlook', 'forecast', 'results', 'quarter', 'q1', 'q2', 'q3', 'q4', 'eps', 'sales'],
+            'positive': ['beat', 'strong', 'surge', 'record', 'exceeded', 'top', 'raise'],
+            'negative': ['miss', 'weak', 'disappoint', 'below', 'cut', 'lower', 'warn']
         },
         'AI/기술': {
-            'keywords': ['ai', 'artificial intelligence', 'nvidia', 'chip', 'semiconductor', 'tech', 'apple', 'microsoft', 'google', 'amazon', 'meta', 'tesla'],
-            'positive': ['surge', 'boom', 'growth', 'demand', 'breakthrough'],
-            'negative': ['concern', 'bubble', 'overvalued', 'decline']
+            'keywords': ['ai', 'artificial', 'intelligence', 'nvidia', 'nvda', 'chip', 'chips', 'semiconductor', 'tech', 'apple', 'aapl', 'microsoft', 'msft', 'google', 'googl', 'amazon', 'amzn', 'meta', 'tesla', 'tsla', 'software', 'cloud', 'data', 'center'],
+            'positive': ['surge', 'boom', 'growth', 'demand', 'breakthrough', 'rally', 'soar', 'jump'],
+            'negative': ['concern', 'bubble', 'overvalued', 'decline', 'fall', 'drop', 'selloff']
         },
         '인플레이션': {
-            'keywords': ['inflation', 'cpi', 'pce', 'price', 'consumer'],
-            'positive': ['cool', 'ease', 'slow', 'lower', 'decline'],
-            'negative': ['rise', 'hot', 'sticky', 'higher', 'surge']
+            'keywords': ['inflation', 'cpi', 'pce', 'price', 'consumer', 'cost', 'spending'],
+            'positive': ['cool', 'ease', 'slow', 'lower', 'decline', 'fall', 'drop'],
+            'negative': ['rise', 'hot', 'sticky', 'higher', 'surge', 'jump', 'accelerate']
         },
         '지정학/무역': {
-            'keywords': ['tariff', 'china', 'trade', 'war', 'geopolitical', 'russia', 'ukraine', 'sanction', 'tension'],
-            'positive': ['deal', 'ease', 'resolve', 'agreement'],
-            'negative': ['tension', 'escalate', 'threat', 'risk', 'war']
+            'keywords': ['tariff', 'china', 'chinese', 'trade', 'war', 'geopolitical', 'russia', 'ukraine', 'sanction', 'tension', 'europe', 'asia', 'import', 'export', 'trump', 'biden'],
+            'positive': ['deal', 'ease', 'resolve', 'agreement', 'peace', 'relief'],
+            'negative': ['tension', 'escalate', 'threat', 'risk', 'war', 'tariff', 'sanction', 'conflict']
         },
         '경기/고용': {
-            'keywords': ['job', 'employment', 'gdp', 'economy', 'recession', 'growth', 'labor', 'unemployment', 'payroll'],
-            'positive': ['strong', 'growth', 'add', 'robust', 'resilient'],
-            'negative': ['weak', 'slow', 'recession', 'layoff', 'decline']
+            'keywords': ['job', 'jobs', 'employment', 'gdp', 'economy', 'economic', 'recession', 'growth', 'labor', 'unemployment', 'payroll', 'hire', 'hiring', 'layoff', 'worker'],
+            'positive': ['strong', 'growth', 'add', 'robust', 'resilient', 'expand', 'hire'],
+            'negative': ['weak', 'slow', 'recession', 'layoff', 'decline', 'contract', 'cut']
         },
         '금/안전자산': {
-            'keywords': ['gold', 'silver', 'safe haven', 'treasury', 'bond', 'yield', 'dollar'],
-            'positive': ['rally', 'surge', 'demand', 'rise'],
-            'negative': ['fall', 'drop', 'decline', 'sell']
+            'keywords': ['gold', 'silver', 'safe', 'haven', 'precious', 'metal', 'commodity', 'oil', 'crude', 'energy'],
+            'positive': ['rally', 'surge', 'demand', 'rise', 'gain', 'climb', 'high'],
+            'negative': ['fall', 'drop', 'decline', 'sell', 'low', 'slide', 'tumble']
         },
         '시장심리': {
-            'keywords': ['rally', 'selloff', 'bull', 'bear', 'volatility', 'vix', 'fear', 'optimism', 'sentiment'],
-            'positive': ['rally', 'bull', 'optimism', 'confidence', 'buy'],
-            'negative': ['selloff', 'bear', 'fear', 'panic', 'sell', 'crash']
+            'keywords': ['rally', 'selloff', 'sell-off', 'bull', 'bear', 'volatility', 'vix', 'fear', 'optimism', 'sentiment', 'investor', 'market', 'stock', 'stocks', 'wall', 'street', 'dow', 'nasdaq', 's&p', 'index'],
+            'positive': ['rally', 'bull', 'optimism', 'confidence', 'buy', 'gain', 'rise', 'surge', 'record', 'high'],
+            'negative': ['selloff', 'sell-off', 'bear', 'fear', 'panic', 'sell', 'crash', 'plunge', 'tumble', 'drop', 'fall', 'low']
         }
     }
     
@@ -1423,9 +1423,11 @@ def analyze_market_sentiment(change_pct, news_list):
     for category, data in keyword_categories.items():
         # 카테고리 키워드 검색
         category_found = False
+        matched_keyword = None
         for kw in data['keywords']:
             if kw in all_titles:
                 category_found = True
+                matched_keyword = kw
                 break
         
         if category_found:
@@ -1443,7 +1445,8 @@ def analyze_market_sentiment(change_pct, news_list):
             
             detected_factors.append({
                 'category': category,
-                'sentiment': sentiment
+                'sentiment': sentiment,
+                'keyword': matched_keyword
             })
     
     return detected_factors
@@ -1476,14 +1479,36 @@ def get_market_interpretation(symbol, name, change_pct, news_list):
         sentiment_icon = "🔺" if f['sentiment'] == 'positive' else ("🔻" if f['sentiment'] == 'negative' else "➖")
         main_factors.append(f"{sentiment_icon} {f['category']}")
     
-    # 기본 해석 (요인 없을 때)
+    # 기본 해석 (요인 없을 때) - 종목별 특성 반영
     if not main_factors:
-        if change_pct > 0.5:
-            main_factors = ["🔺 시장 전반 강세", "🔺 매수세 유입"]
-        elif change_pct < -0.5:
-            main_factors = ["🔻 시장 전반 약세", "🔻 차익실현 매물"]
+        if symbol == 'QQQM':
+            if change_pct > 0.5:
+                main_factors = ["🔺 기술주 강세", "🔺 AI/반도체 수요"]
+            elif change_pct < -0.5:
+                main_factors = ["🔻 기술주 약세", "🔻 금리 상승 우려"]
+            else:
+                main_factors = ["➖ 기술주 혼조", "➖ 방향성 탐색 중"]
+        elif symbol == 'SCHD':
+            if change_pct > 0.5:
+                main_factors = ["🔺 배당주 강세", "🔺 안전자산 선호"]
+            elif change_pct < -0.5:
+                main_factors = ["🔻 배당주 약세", "🔻 성장주 쏠림"]
+            else:
+                main_factors = ["➖ 배당주 보합", "➖ 수익률 안정"]
+        elif symbol == 'IAU':
+            if change_pct > 0.5:
+                main_factors = ["🔺 금 강세", "🔺 안전자산 수요", "🔺 달러 약세"]
+            elif change_pct < -0.5:
+                main_factors = ["🔻 금 약세", "🔻 위험선호 심리", "🔻 달러 강세"]
+            else:
+                main_factors = ["➖ 금 보합", "➖ 관망세"]
         else:
-            main_factors = ["➖ 뚜렷한 방향성 없음", "➖ 관망세 지속"]
+            if change_pct > 0.5:
+                main_factors = ["🔺 시장 강세", "🔺 매수세 유입"]
+            elif change_pct < -0.5:
+                main_factors = ["🔻 시장 약세", "🔻 매도세 우위"]
+            else:
+                main_factors = ["➖ 방향성 없음", "➖ 관망세"]
     
     return {
         'direction': direction,

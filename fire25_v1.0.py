@@ -1350,24 +1350,58 @@ st.header("📊 오늘의 시장 동향")
 @st.cache_data(ttl=1800)  # 30분 캐시
 def get_market_summary(symbol):
     """Yahoo Finance에서 종목 관련 뉴스 가져오기"""
+    news_list = []
     try:
         ticker = yf.Ticker(symbol)
-        news = ticker.news
+        
+        # 방법 1: ticker.news 시도
+        news = None
+        try:
+            news = ticker.news
+        except:
+            pass
+        
+        # 방법 2: get_news() 메서드 시도
+        if not news:
+            try:
+                news = ticker.get_news()
+            except:
+                pass
         
         if news and len(news) > 0:
-            # 최신 뉴스 5개 가져오기
-            news_list = []
             for item in news[:5]:
-                if item.get('title'):
+                title = item.get('title', '') or item.get('headline', '')
+                if title:
                     news_list.append({
-                        'title': item.get('title', ''),
-                        'publisher': item.get('publisher', ''),
-                        'link': item.get('link', '#')
+                        'title': title,
+                        'publisher': item.get('publisher', '') or item.get('source', ''),
+                        'link': item.get('link', '') or item.get('url', '#')
                     })
-            return news_list
-        return []
-    except:
-        return []
+        
+        return news_list
+    except Exception as e:
+        # 디버깅용: 에러 발생 시 빈 리스트 반환
+        return news_list
+
+def get_broader_market_news():
+    """시장 전체 뉴스 가져오기 (SPY, QQQ 기반)"""
+    all_news = []
+    for symbol in ['SPY', 'QQQ', '^GSPC']:
+        try:
+            ticker = yf.Ticker(symbol)
+            news = ticker.news if hasattr(ticker, 'news') else []
+            if news:
+                for item in news[:3]:
+                    title = item.get('title', '')
+                    if title and title not in [n['title'] for n in all_news]:
+                        all_news.append({
+                            'title': title,
+                            'publisher': item.get('publisher', ''),
+                            'link': item.get('link', '#')
+                        })
+        except:
+            continue
+    return all_news[:5]
 
 def analyze_market_sentiment(change_pct, news_list):
     """시장 심리 및 원인 상세 분석"""
@@ -1522,6 +1556,18 @@ with st.spinner('📡 시장 동향 분석 중...'):
     qqqm_news = get_market_summary('QQQM')
     schd_news = get_market_summary('SCHD')
     iau_news = get_market_summary('IAU')
+    
+    # 개별 종목 뉴스가 없으면 시장 전체 뉴스 사용
+    market_news = None
+    if not qqqm_news or not schd_news or not iau_news:
+        market_news = get_broader_market_news()
+    
+    if not qqqm_news:
+        qqqm_news = market_news or []
+    if not schd_news:
+        schd_news = market_news or []
+    if not iau_news:
+        iau_news = market_news or []
     
     qqqm_analysis = get_market_interpretation('QQQM', '나스닥 100', qqqm_data['change_pct'], qqqm_news)
     schd_analysis = get_market_interpretation('SCHD', '배당주', schd_data['change_pct'], schd_news)

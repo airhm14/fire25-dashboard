@@ -4,8 +4,6 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
 import time
-import requests
-from bs4 import BeautifulSoup
 
 # =====================================================================
 # 페이지 설정
@@ -173,10 +171,10 @@ with st.sidebar:
     qqqm_qty = st.number_input("QQQM 수량", min_value=0.0, value=100.0, step=1.0, format="%.2f")
     schd_qty = st.number_input("SCHD 수량", min_value=0.0, value=50.0, step=1.0, format="%.2f")
     iau_qty = st.number_input("IAU 수량", min_value=0.0, value=20.0, step=1.0, format="%.2f")
+    sgov_qty = st.number_input("SGOV 수량", min_value=0.0, value=30.0, step=1.0, format="%.2f",
+                                help="단기국채 ETF (SGOV) 보유 수량")
     
-    st.subheader("보유 현금")
-    sgov_value = st.number_input("SGOV 평가액 (USD)", min_value=0.0, value=3000.0, step=100.0, format="%.2f", 
-                                  help="단기국채 ETF (SGOV) 보유 금액")
+    st.subheader("💵 예수금")
     cash_deposit = st.number_input("예수금 (USD)", min_value=0.0, value=2000.0, step=100.0, format="%.2f",
                                     help="증권계좌 현금 (바로 투자 가능한 자금)")
     
@@ -184,28 +182,6 @@ with st.sidebar:
     st.subheader("💰 신규 자금")
     new_cash = st.number_input("월급/추가 입금 (USD)", min_value=0.0, value=0.0, step=100.0, format="%.2f",
                                 help="이번 달 투입할 신규 자금 (월급, 보너스 등)")
-    
-    # 총 현금 계산
-    total_cash = sgov_value + cash_deposit
-    
-    st.markdown("---")
-    
-    # 현금 현황 표시 (HTML 대신 Streamlit 컴포넌트 사용)
-    st.markdown("### 💰 현금 현황")
-    
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        st.metric("SGOV", f"${sgov_value:,.2f}")
-    with col2:
-        st.metric("예수금", f"${cash_deposit:,.2f}")
-    
-    st.markdown(f"**기존 현금:** ${total_cash:,.2f}")
-    
-    if new_cash > 0:
-        st.markdown(f"**+ 신규 자금:** :blue[${new_cash:,.2f}]")
-        st.markdown(f"**투입 가능 총액:** :orange[${total_cash + new_cash:,.2f}]")
-    
-    st.info("💡 값 변경 후 화면을 스크롤하면 자동으로 계산이 업데이트됩니다")
     
     st.markdown("---")
     st.markdown(f"""
@@ -273,6 +249,7 @@ def get_stock_data(symbol, period="3mo"):
             # 이동평균선 계산
             df['SMA_20'] = df['Close'].rolling(window=20).mean()
             df['SMA_50'] = df['Close'].rolling(window=50).mean()
+            df['SMA_100'] = df['Close'].rolling(window=100).mean()
             df['SMA_200'] = df['Close'].rolling(window=200).mean()
             
             # RSI 계산
@@ -294,6 +271,7 @@ def get_stock_data(symbol, period="3mo"):
                 'change_pct': ((latest['Close'] - prev_close) / prev_close) * 100,
                 'sma_20': latest['SMA_20'],
                 'sma_50': latest['SMA_50'],
+                'sma_100': latest['SMA_100'],
                 'sma_200': latest['SMA_200'],
                 'rsi': latest['RSI'],
                 'volume': latest['Volume'],
@@ -313,15 +291,28 @@ def get_stock_data(symbol, period="3mo"):
 # 데이터 로딩
 # =====================================================================
 with st.spinner('📡 실시간 데이터 수신 중...'):
-    qqqm_data = get_stock_data('QQQM')
-    schd_data = get_stock_data('SCHD')
-    iau_data = get_stock_data('IAU')
+    qqqm_data = get_stock_data('QQQM', period="1y")  # 200일선 계산을 위해 1년
+    schd_data = get_stock_data('SCHD', period="1y")
+    iau_data = get_stock_data('IAU', period="1y")
+    sgov_data = get_stock_data('SGOV', period="1mo")  # SGOV 가격 조회
     vix_data = get_stock_data('^VIX', period="1mo")  # VIX는 1개월만
 
 # 데이터 검증
 if not all([qqqm_data, schd_data, iau_data]):
     st.error("⚠️ 일부 데이터를 가져오지 못했습니다. 새로고침 버튼을 눌러주세요.")
     st.stop()
+
+# SGOV 가격 (데이터 없으면 기본값 사용)
+if sgov_data:
+    sgov_price = sgov_data['price']
+else:
+    sgov_price = 100.50  # SGOV 기본 추정가
+
+# SGOV 평가액 계산 (수량 × 현재가)
+sgov_value = sgov_qty * sgov_price
+
+# 총 현금 계산
+total_cash = sgov_value + cash_deposit
 
 # =====================================================================
 # 포트폴리오 계산
@@ -341,11 +332,34 @@ sgov_pct = (sgov_value / total_value) * 100 if total_value > 0 else 0
 deposit_pct = (cash_deposit / total_value) * 100 if total_value > 0 else 0
 
 # =====================================================================
+# 사이드바: 현금 현황 표시 (데이터 로딩 후)
+# =====================================================================
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 💰 현금성 자산 현황")
+    
+    # SGOV 정보 표시
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.metric("SGOV", f"{sgov_qty:.0f}주")
+    with col2:
+        st.metric("현재가", f"${sgov_price:.2f}")
+    
+    st.markdown(f"**SGOV 평가액:** :green[${sgov_value:,.2f}]")
+    st.markdown(f"**예수금:** ${cash_deposit:,.2f}")
+    st.markdown(f"**현금성 자산 합계:** :blue[${total_cash:,.2f}]")
+    
+    if new_cash > 0:
+        st.markdown("---")
+        st.markdown(f"**+ 신규 자금:** :blue[${new_cash:,.2f}]")
+        st.markdown(f"**투입 가능 총액:** :orange[${total_cash + new_cash:,.2f}]")
+
+# =====================================================================
 # 메인 대시보드: 실시간 가격
 # =====================================================================
 st.header("💹 실시간 시세")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
     change_class = 'positive' if qqqm_data['change'] >= 0 else 'negative'
@@ -375,6 +389,18 @@ with col3:
     st.markdown(f"<p style='font-size: 0.9em; color: #94a3b8;'>거래량: {iau_data['volume']:,.0f}</p>", unsafe_allow_html=True)
 
 with col4:
+    if sgov_data:
+        st.metric(
+            label="SGOV (현금성)",
+            value=f"${sgov_price:.2f}",
+            delta=f"{sgov_data['change_pct']:+.2f}%"
+        )
+        st.markdown(f"<p style='font-size: 0.9em; color: #94a3b8;'>보유: {sgov_qty:.0f}주</p>", unsafe_allow_html=True)
+    else:
+        st.metric(label="SGOV (현금성)", value=f"${sgov_price:.2f}")
+        st.markdown(f"<p style='font-size: 0.9em; color: #94a3b8;'>보유: {sgov_qty:.0f}주</p>", unsafe_allow_html=True)
+
+with col5:
     if vix_data:
         st.metric(
             label="VIX (공포 지수)",
@@ -389,7 +415,7 @@ with col4:
 st.markdown("---")
 
 # =====================================================================
-# 핵심 로직: 매뉴얼 V5.6
+# 핵심 로직: 매뉴얼 V5.8
 # =====================================================================
 st.header("🎯 작전 상황 분석")
 
@@ -398,8 +424,33 @@ defcon_triggered = False
 if vix_data and vix_data['price'] <= 14.0 and qqqm_data['rsi'] >= 70:
     defcon_triggered = True
 
-# 50일선 붕괴 체크
-puddle_alert = qqqm_data['price'] < qqqm_data['sma_50']
+# 웅덩이 4단계 체크 (V5.8)
+puddle_stage = 0
+puddle_alert = False
+
+# 200일선 상향돌파 체크 (4단계)
+# 이전 종가가 200일선 아래였고, 현재가가 200일선 위인 경우
+if len(qqqm_data['df']) >= 2:
+    prev_close = qqqm_data['df'].iloc[-2]['Close']
+    prev_sma200 = qqqm_data['df'].iloc[-2]['SMA_200']
+    if pd.notna(prev_sma200) and pd.notna(qqqm_data['sma_200']):
+        was_below_200 = prev_close < prev_sma200
+        is_above_200 = qqqm_data['price'] > qqqm_data['sma_200']
+        if was_below_200 and is_above_200:
+            puddle_stage = 4
+            puddle_alert = True
+
+# 하락 단계 체크 (1~3단계)
+if puddle_stage == 0:
+    if pd.notna(qqqm_data['sma_200']) and qqqm_data['price'] < qqqm_data['sma_200']:
+        puddle_stage = 3  # 200일선 하향돌파
+        puddle_alert = True
+    elif pd.notna(qqqm_data['sma_100']) and qqqm_data['price'] < qqqm_data['sma_100']:
+        puddle_stage = 2  # 100일선 하향돌파
+        puddle_alert = True
+    elif pd.notna(qqqm_data['sma_50']) and qqqm_data['price'] < qqqm_data['sma_50']:
+        puddle_stage = 1  # 50일선 하향돌파
+        puddle_alert = True
 
 # 리밸런싱 체크
 rebalancing_needed = qqqm_pct > 75
@@ -411,48 +462,45 @@ if defcon_triggered:
         <div class="warning-title">🚨 DEFCON 세이빙 발동!</div>
         <p><strong>VIX:</strong> {vix_data['price']:.2f} (≤ 14.00)</p>
         <p><strong>RSI:</strong> {qqqm_data['rsi']:.2f} (≥ 70)</p>
-        <p><strong>조치:</strong> 신규 월급을 SGOV로만 투입하세요</p>
+        <p><strong>조치:</strong> 신규 자금 100% SGOV 투입 (QQQM/SCHD/IAU 매수 금지)</p>
     </div>
     """, unsafe_allow_html=True)
 
 if puddle_alert:
-    distance_pct = ((qqqm_data['price'] - qqqm_data['sma_50']) / qqqm_data['sma_50']) * 100
+    # 웅덩이 단계별 정보
+    stage_info = {
+        1: {"name": "1단계: 50일선 하향돌파", "color": "#fbbf24", "rate": 15, "desc": "가벼운 조정, 보수적 접근"},
+        2: {"name": "2단계: 100일선 하향돌파", "color": "#f97316", "rate": 35, "desc": "본격적인 조정 구간, 적극적 매수 기회"},
+        3: {"name": "3단계: 200일선 하향돌파", "color": "#ef4444", "rate": 50, "desc": "심각한 조정/약세장, 신중하게 접근"},
+        4: {"name": "4단계: 200일선 상향돌파", "color": "#10b981", "rate": 100, "desc": "바닥 확인 완료, 회복 초입 공격 매수!"}
+    }
     
-    # 투입 가능한 자금 계산 (실시간)
-    sgov_minimum = total_value * 0.07  # 총 자산의 7%
-    available_sgov = max(0, sgov_value - sgov_minimum)  # SGOV 7% 초과분
-    injection_30 = available_sgov * 0.30  # SGOV 초과분의 30%
-    injection_total = injection_30 + cash_deposit  # 예수금 전액 활용 가능
+    info = stage_info[puddle_stage]
     
-    # 각 항목의 비중 계산
-    sgov_excess_pct = ((sgov_value - sgov_minimum) / total_value) * 100 if total_value > 0 else 0
+    # 현금성 자산 = SGOV + 예수금 (V5.8 기준)
+    cash_base = sgov_value + cash_deposit
+    injection_amount = cash_base * (info["rate"] / 100)
+    
+    # 이동평균선 값들
+    sma_50_val = f"${qqqm_data['sma_50']:.2f}" if pd.notna(qqqm_data['sma_50']) else "N/A"
+    sma_100_val = f"${qqqm_data['sma_100']:.2f}" if pd.notna(qqqm_data['sma_100']) else "N/A"
+    sma_200_val = f"${qqqm_data['sma_200']:.2f}" if pd.notna(qqqm_data['sma_200']) else "N/A"
     
     st.markdown(f"""
-    <div class="warning-box">
-        <div class="warning-title">🚨 50일선 붕괴! 웅덩이 매수 구간</div>
+    <div class="warning-box" style="border-color: {info['color']};">
+        <div class="warning-title" style="color: {info['color']};">🚨 웅덩이 매수 구간: {info['name']}</div>
         <p><strong>현재가:</strong> ${qqqm_data['price']:.2f}</p>
-        <p><strong>50일선:</strong> ${qqqm_data['sma_50']:.2f}</p>
-        <p><strong>괴리율:</strong> {distance_pct:.2f}%</p>
+        <p><strong>50일선:</strong> {sma_50_val} | <strong>100일선:</strong> {sma_100_val} | <strong>200일선:</strong> {sma_200_val}</p>
+        <p><strong>판단:</strong> {info['desc']}</p>
         <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
-        <p style="font-weight: 700; color: #fbbf24; font-size: 1.1em;">💰 투입 가능 자금 (실시간 계산):</p>
+        <p style="font-weight: 700; color: {info['color']}; font-size: 1.1em;">💰 투입 전략 (V5.8)</p>
         <div style="background: rgba(251, 191, 36, 0.05); padding: 12px; border-radius: 6px; margin: 10px 0;">
-            <p style="margin: 5px 0;">• <strong>총 자산:</strong> ${total_value:,.2f}</p>
-            <p style="margin: 5px 0;">• <strong>SGOV 보유:</strong> ${sgov_value:,.2f} <span style="color: #10b981;">({sgov_pct:.2f}%)</span></p>
-            <p style="margin: 5px 0;">• <strong>SGOV 최소 (7%):</strong> ${sgov_minimum:,.2f}</p>
-            <p style="margin: 5px 0;">• <strong>SGOV 초과분:</strong> ${available_sgov:,.2f} <span style="color: #fbbf24;">({sgov_excess_pct:.2f}% 유지)</span></p>
+            <p style="margin: 5px 0;">• <strong>현금성 자산:</strong> ${cash_base:,.2f}</p>
+            <p style="margin: 5px 0;">  └─ SGOV: ${sgov_value:,.2f} + 예수금: ${cash_deposit:,.2f}</p>
+            <p style="margin: 5px 0;">• <strong>투입 비율:</strong> {info['rate']}%</p>
+            <p style="margin: 5px 0; font-size: 1.2em; color: {info['color']};">• <strong>투입 금액:</strong> ${injection_amount:,.2f}</p>
         </div>
-        <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 10px 0;">
-        <div style="background: rgba(16, 185, 129, 0.05); padding: 12px; border-radius: 6px; margin: 10px 0;">
-            <p style="margin: 5px 0;">• <strong>SGOV 30% 투입:</strong> <span style="color: #10b981; font-weight: 700;">${injection_30:,.2f}</span></p>
-            <p style="margin: 5px 0; font-size: 0.9em; color: #94a3b8;">  └ ${available_sgov:,.2f} × 30% = ${injection_30:,.2f}</p>
-            <p style="margin: 5px 0;">• <strong>예수금 전액:</strong> <span style="color: #10b981; font-weight: 700;">${cash_deposit:,.2f}</span></p>
-            <p style="margin: 8px 0; padding-top: 8px; border-top: 1px solid rgba(16, 185, 129, 0.2);">• <strong>총 투입 가능:</strong> <span style="color: #10b981; font-size: 1.3em; font-weight: 700;">${injection_total:,.2f}</span></p>
-        </div>
-        <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
-        <p><strong>📋 조치:</strong></p>
-        <p>• <strong>1단계:</strong> SGOV 초과분의 30% 투입 (${injection_30:,.2f})</p>
-        <p>• <strong>2단계:</strong> 예수금 활용 검토 (${cash_deposit:,.2f} 가용)</p>
-        <p style="color: #10b981; font-weight: 700; margin-top: 10px;">💡 QQQM 약 {(injection_total / qqqm_data['price']):.1f}주 매수 가능</p>
+        <p style="color: #10b981; font-weight: 700; margin-top: 10px;">💡 + 신규 자금도 함께 투입 (목표 비중 70/15/5/10)</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -512,18 +560,104 @@ with col2:
 with col3:
     sma_status = ""
     sma_color = ""
-    if qqqm_data['price'] > qqqm_data['sma_50']:
+    if pd.notna(qqqm_data['sma_50']) and qqqm_data['price'] > qqqm_data['sma_50']:
         sma_status = "✅ 50일선 위"
         sma_color = "#10b981"
-    else:
+    elif pd.notna(qqqm_data['sma_50']):
         sma_status = "🚨 50일선 아래"
         sma_color = "#ef4444"
+    else:
+        sma_status = "⏳ 데이터 부족"
+        sma_color = "#94a3b8"
+    
+    sma_50_display = f"${qqqm_data['sma_50']:.2f}" if pd.notna(qqqm_data['sma_50']) else "N/A"
     
     st.markdown(f"""
     <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.8) 100%); border-radius: 12px; border: 2px solid {sma_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);">
         <p style="font-size: 0.9em; color: #cbd5e1; margin-bottom: 8px; font-weight: 600;">50일 이동평균선</p>
-        <p style="font-size: 2.5em; font-weight: 700; color: {sma_color}; margin: 10px 0;">${qqqm_data['sma_50']:.2f}</p>
+        <p style="font-size: 2.5em; font-weight: 700; color: {sma_color}; margin: 10px 0;">{sma_50_display}</p>
         <p style="font-size: 1.1em; color: {sma_color}; font-weight: 600;">{sma_status}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# 추가 지표 행: 100일선, 200일선, 웅덩이 단계
+st.markdown("<br>", unsafe_allow_html=True)
+col4, col5, col6 = st.columns(3)
+
+with col4:
+    sma_status = ""
+    sma_color = ""
+    if pd.notna(qqqm_data['sma_100']) and qqqm_data['price'] > qqqm_data['sma_100']:
+        sma_status = "✅ 100일선 위"
+        sma_color = "#10b981"
+    elif pd.notna(qqqm_data['sma_100']):
+        sma_status = "🚨 100일선 아래"
+        sma_color = "#f97316"
+    else:
+        sma_status = "⏳ 데이터 부족"
+        sma_color = "#94a3b8"
+    
+    sma_100_display = f"${qqqm_data['sma_100']:.2f}" if pd.notna(qqqm_data['sma_100']) else "N/A"
+    
+    st.markdown(f"""
+    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.8) 100%); border-radius: 12px; border: 2px solid {sma_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);">
+        <p style="font-size: 0.9em; color: #cbd5e1; margin-bottom: 8px; font-weight: 600;">100일 이동평균선</p>
+        <p style="font-size: 2.5em; font-weight: 700; color: {sma_color}; margin: 10px 0;">{sma_100_display}</p>
+        <p style="font-size: 1.1em; color: {sma_color}; font-weight: 600;">{sma_status}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col5:
+    sma_status = ""
+    sma_color = ""
+    if pd.notna(qqqm_data['sma_200']) and qqqm_data['price'] > qqqm_data['sma_200']:
+        sma_status = "✅ 200일선 위"
+        sma_color = "#10b981"
+    elif pd.notna(qqqm_data['sma_200']):
+        sma_status = "🚨 200일선 아래"
+        sma_color = "#ef4444"
+    else:
+        sma_status = "⏳ 데이터 부족"
+        sma_color = "#94a3b8"
+    
+    sma_200_display = f"${qqqm_data['sma_200']:.2f}" if pd.notna(qqqm_data['sma_200']) else "N/A"
+    
+    st.markdown(f"""
+    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.8) 100%); border-radius: 12px; border: 2px solid {sma_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);">
+        <p style="font-size: 0.9em; color: #cbd5e1; margin-bottom: 8px; font-weight: 600;">200일 이동평균선</p>
+        <p style="font-size: 2.5em; font-weight: 700; color: {sma_color}; margin: 10px 0;">{sma_200_display}</p>
+        <p style="font-size: 1.1em; color: {sma_color}; font-weight: 600;">{sma_status}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col6:
+    # 웅덩이 단계 표시
+    if puddle_stage == 0:
+        stage_text = "정상"
+        stage_color = "#10b981"
+        stage_icon = "✅"
+    elif puddle_stage == 1:
+        stage_text = "1단계 (50일선)"
+        stage_color = "#fbbf24"
+        stage_icon = "⚠️"
+    elif puddle_stage == 2:
+        stage_text = "2단계 (100일선)"
+        stage_color = "#f97316"
+        stage_icon = "🔶"
+    elif puddle_stage == 3:
+        stage_text = "3단계 (200일선↓)"
+        stage_color = "#ef4444"
+        stage_icon = "🚨"
+    else:  # stage 4
+        stage_text = "4단계 (200일선↑)"
+        stage_color = "#10b981"
+        stage_icon = "🚀"
+    
+    st.markdown(f"""
+    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.8) 100%); border-radius: 12px; border: 2px solid {stage_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);">
+        <p style="font-size: 0.9em; color: #cbd5e1; margin-bottom: 8px; font-weight: 600;">웅덩이 단계</p>
+        <p style="font-size: 2em; font-weight: 700; color: {stage_color}; margin: 10px 0;">{stage_icon}</p>
+        <p style="font-size: 1.1em; color: {stage_color}; font-weight: 600;">{stage_text}</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -638,6 +772,14 @@ fig.add_trace(go.Scatter(
 
 fig.add_trace(go.Scatter(
     x=qqqm_data['df'].index,
+    y=qqqm_data['df']['SMA_100'],
+    mode='lines',
+    name='100일선',
+    line=dict(color='#f97316', width=2)
+))
+
+fig.add_trace(go.Scatter(
+    x=qqqm_data['df'].index,
     y=qqqm_data['df']['SMA_200'],
     mode='lines',
     name='200일선',
@@ -723,7 +865,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 상황 판단
-is_puddle = puddle_alert  # 50일선 붕괴
+is_puddle = puddle_alert  # 웅덩이 발생
 is_defcon = defcon_triggered  # Defcon 발동
 has_new_cash = new_cash > 0  # 신규 자금
 needs_rebalancing = qqqm_pct > 75  # Smart Shoulder
@@ -735,7 +877,9 @@ situation_badges = []
 if is_defcon:
     situation_badges.append("🚨 <span style='background: #ef4444; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>DEFCON 발동</span>")
 if is_puddle:
-    situation_badges.append("🚨 <span style='background: #ef4444; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>50일선 붕괴</span>")
+    stage_colors = {1: "#fbbf24", 2: "#f97316", 3: "#ef4444", 4: "#10b981"}
+    stage_names = {1: "1단계(50일선)", 2: "2단계(100일선)", 3: "3단계(200일선↓)", 4: "4단계(200일선↑)"}
+    situation_badges.append(f"🚨 <span style='background: {stage_colors[puddle_stage]}; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>웅덩이 {stage_names[puddle_stage]}</span>")
 if needs_rebalancing:
     situation_badges.append("⚠️ <span style='background: #fbbf24; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>리밸런싱 필요</span>")
 if has_new_cash:
@@ -750,78 +894,138 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 # 우선순위 1: Defcon 발동 중
 if is_defcon:
-    st.markdown("""
-    <div class="warning-box">
-        <div class="warning-title">🚨 우선순위 1: DEFCON 세이빙</div>
-        <p style="font-size: 1.1em; margin: 15px 0;"><strong>📋 조치 사항:</strong></p>
-        <ol style="line-height: 2;">
-            <li><strong>신규 자금 → 100% SGOV 투입</strong></li>
-            <li><strong>기존 포지션 → 유지 (매도 금지)</strong></li>
-            <li><strong>예수금 → 동결 (긴급용으로만 사용)</strong></li>
-        </ol>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if has_new_cash:
+    # DEFCON + 웅덩이 동시 발생 체크
+    if is_puddle:
         st.markdown(f"""
-        <div style="background: rgba(59, 130, 246, 0.1); border-left: 4px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 15px 0;">
-            <p style="font-size: 1.2em; font-weight: 700; color: #3b82f6; margin-bottom: 15px;">💰 신규 자금 배분</p>
-            <div style="background: rgba(15, 23, 42, 0.5); border-radius: 8px; padding: 15px; margin: 10px 0;">
-                <p style="font-size: 1.1em; margin: 10px 0;"><strong>SGOV 매수:</strong> <span style="color: #10b981; font-size: 1.3em; font-weight: 700;">${new_cash:,.2f}</span></p>
-                <p style="color: #94a3b8; font-size: 0.9em; margin-top: 10px;">💡 Defcon 해제 후 정상 배분으로 전환</p>
-            </div>
+        <div class="warning-box">
+            <div class="warning-title">🚨 DEFCON + 웅덩이 동시 발생!</div>
+            <p style="font-size: 1.1em; margin: 15px 0;"><strong>📋 특수 상황 대응 (V5.8)</strong></p>
         </div>
         """, unsafe_allow_html=True)
+        
+        if puddle_stage <= 2:  # 1~2단계
+            st.markdown("""
+            <div style="background: rgba(251, 191, 36, 0.1); border-left: 4px solid #fbbf24; padding: 15px; margin: 10px 0; border-radius: 8px;">
+                <p style="font-weight: 700; color: #fbbf24;">웅덩이 1~2단계 (50일선/100일선):</p>
+                <ul style="margin: 10px 0;">
+                    <li><strong>신규 자금:</strong> 100% SGOV 투입</li>
+                    <li><strong>기존 현금:</strong> 웅덩이 매수에 사용 가능</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if has_new_cash:
+                st.info(f"💰 신규 자금 ${new_cash:,.2f} → SGOV 투입")
+            
+            # 기존 현금으로 웅덩이 매수
+            import math
+            stage_info = {1: 15, 2: 35}
+            rate = stage_info[puddle_stage]
+            cash_base = sgov_value + cash_deposit
+            injection = cash_base * (rate / 100)
+            
+            st.warning(f"📊 기존 현금으로 웅덩이 매수 ({rate}%)")
+            st.write(f"• 현금성 자산: ${cash_base:,.2f}")
+            st.write(f"• 투입 금액: ${injection:,.2f}")
+            
+        else:  # 3단계 이후
+            st.markdown("""
+            <div style="background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 15px; margin: 10px 0; border-radius: 8px;">
+                <p style="font-weight: 700; color: #ef4444;">웅덩이 3단계 이후 (200일선):</p>
+                <ul style="margin: 10px 0;">
+                    <li><strong>신규 자금:</strong> 목표 비중대로 투입 (70/15/5/10)</li>
+                    <li><strong>기존 현금:</strong> 웅덩이 매수에 사용</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            if has_new_cash:
+                import math
+                qqqm_shares = math.floor(new_cash * 0.70 / qqqm_data['price'])
+                schd_shares = math.floor(new_cash * 0.15 / schd_data['price'])
+                iau_shares = math.floor(new_cash * 0.05 / iau_data['price'])
+                sgov_amount = new_cash * 0.10
+                
+                st.success(f"💰 신규 자금 배분 (${new_cash:,.2f})")
+                st.write(f"• QQQM: {qqqm_shares}주")
+                st.write(f"• SCHD: {schd_shares}주")
+                st.write(f"• IAU: {iau_shares}주")
+                st.write(f"• SGOV: ${sgov_amount:,.2f}")
     else:
-        st.info("💡 신규 자금이 없습니다. 월급/추가 입금 시 SGOV로만 투입하세요.")
+        # 순수 DEFCON (웅덩이 없음)
+        st.markdown("""
+        <div class="warning-box">
+            <div class="warning-title">🚨 우선순위 1: DEFCON 세이빙</div>
+            <p style="font-size: 1.1em; margin: 15px 0;"><strong>📋 조치 사항:</strong></p>
+            <ol style="line-height: 2;">
+                <li><strong>신규 자금 → 100% SGOV 투입</strong></li>
+                <li><strong>기존 포지션 → 유지 (매도 금지)</strong></li>
+                <li><strong>예수금 → 동결 (긴급용으로만 사용)</strong></li>
+            </ol>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if has_new_cash:
+            st.markdown(f"""
+            <div style="background: rgba(59, 130, 246, 0.1); border-left: 4px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 15px 0;">
+                <p style="font-size: 1.2em; font-weight: 700; color: #3b82f6; margin-bottom: 15px;">💰 신규 자금 배분</p>
+                <div style="background: rgba(15, 23, 42, 0.5); border-radius: 8px; padding: 15px; margin: 10px 0;">
+                    <p style="font-size: 1.1em; margin: 10px 0;"><strong>SGOV 매수:</strong> <span style="color: #10b981; font-size: 1.3em; font-weight: 700;">${new_cash:,.2f}</span></p>
+                    <p style="color: #94a3b8; font-size: 0.9em; margin-top: 10px;">💡 DEFCON 해제 후 정상 배분으로 전환</p>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info("💡 신규 자금이 없습니다. 월급/추가 입금 시 SGOV로만 투입하세요.")
 
-# 우선순위 2: 50일선 붕괴 (웅덩이)
+# 우선순위 2: 웅덩이 (4단계 시스템)
 elif is_puddle:
-    st.markdown("""
+    stage_info = {
+        1: {"name": "1단계: 50일선 하향돌파", "rate": 15, "desc": "현금성 자산의 15% 투입"},
+        2: {"name": "2단계: 100일선 하향돌파", "rate": 35, "desc": "남은 현금의 35% 투입"},
+        3: {"name": "3단계: 200일선 하향돌파", "rate": 50, "desc": "남은 현금의 50% 투입"},
+        4: {"name": "4단계: 200일선 상향돌파", "rate": 100, "desc": "남은 현금 전부 투입 (100%)"}
+    }
+    
+    info = stage_info[puddle_stage]
+    
+    st.markdown(f"""
     <div class="warning-box">
-        <div class="warning-title">🚨 우선순위 1: 웅덩이 매수</div>
-        <p style="font-size: 1.1em; margin: 15px 0;"><strong>📋 조치 사항:</strong></p>
-        <ol style="line-height: 2;">
-            <li><strong>1단계: SGOV 초과분 30% 투입</strong></li>
-            <li><strong>2단계: 예수금 활용</strong></li>
-            <li><strong>3단계: 신규 자금 투입</strong></li>
-        </ol>
+        <div class="warning-title">🚨 우선순위 1: 웅덩이 매수 - {info['name']}</div>
+        <p style="font-size: 1.1em; margin: 15px 0;"><strong>📋 {info['desc']}</strong></p>
+        <p style="color: #94a3b8;">현금성 자산 = SGOV + 예수금</p>
     </div>
     """, unsafe_allow_html=True)
     
-    # 웅덩이 대응 계산
+    # 웅덩이 대응 계산 (V5.8)
     import math
     
-    sgov_minimum = total_value * 0.07
-    available_sgov = max(0, sgov_value - sgov_minimum)
-    injection_sgov = available_sgov * 0.30
-    injection_deposit = cash_deposit
-    injection_new = new_cash
-    total_injection = injection_sgov + injection_deposit + injection_new
+    # 현금성 자산 = SGOV + 예수금
+    cash_base = sgov_value + cash_deposit
+    injection_rate = info["rate"] / 100
+    injection_amount = cash_base * injection_rate
     
-    # SGOV 주가 정보 가져오기
-    try:
-        sgov_ticker = yf.Ticker("SGOV")
-        sgov_price = sgov_ticker.history(period='1d')['Close'].iloc[-1]
-        sgov_shares_total = sgov_value / sgov_price if sgov_price > 0 else 0
-        sgov_shares_to_sell = injection_sgov / sgov_price if sgov_price > 0 else 0
-    except:
-        sgov_price = 93.5  # 대략적인 SGOV 가격
-        sgov_shares_total = sgov_value / sgov_price
-        sgov_shares_to_sell = injection_sgov / sgov_price
+    # SGOV에서 매도할 금액 계산 (예수금 먼저 사용, 부족하면 SGOV 매도)
+    if injection_amount <= cash_deposit:
+        # 예수금만으로 충분
+        use_deposit = injection_amount
+        sgov_sell_amount = 0
+        sgov_shares_to_sell = 0
+    else:
+        # 예수금 전액 + SGOV 일부 매도
+        use_deposit = cash_deposit
+        sgov_sell_amount = injection_amount - cash_deposit
+        sgov_shares_to_sell = math.ceil(sgov_sell_amount / sgov_price)
+        sgov_sell_amount = sgov_shares_to_sell * sgov_price  # 실제 매도 금액
     
-    # 매도는 올림 (2.6 → 3주)
-    sgov_shares_to_sell_int = math.ceil(sgov_shares_to_sell)
-    actual_sgov_amount = sgov_shares_to_sell_int * sgov_price
+    # 총 투입 금액 (신규 자금 포함)
+    total_injection = use_deposit + sgov_sell_amount + new_cash
     
-    # 실제 총 투입액 재계산
-    actual_total_injection = actual_sgov_amount + injection_deposit + injection_new
-    
-    # 매수는 내림 (2.6 → 2주)
-    qqqm_shares = math.floor(actual_total_injection * 0.70 / qqqm_data['price'])
-    schd_shares = math.floor(actual_total_injection * 0.15 / schd_data['price'])
-    iau_shares = math.floor(actual_total_injection * 0.05 / iau_data['price'])
-    sgov_buy_amount = actual_total_injection * 0.10
+    # 매수 계획 (목표 비중 70/15/5/10)
+    qqqm_shares = math.floor(total_injection * 0.70 / qqqm_data['price'])
+    schd_shares = math.floor(total_injection * 0.15 / schd_data['price'])
+    iau_shares = math.floor(total_injection * 0.05 / iau_data['price'])
+    sgov_buy_amount = total_injection * 0.10
     
     # 실제 매수 금액
     qqqm_buy_amount = qqqm_shares * qqqm_data['price']
@@ -829,30 +1033,45 @@ elif is_puddle:
     iau_buy_amount = iau_shares * iau_data['price']
     
     # 투입 가능 자금 표시
-    st.success("💰 투입 가능 자금")
+    st.success("💰 투입 자금 계산")
     
-    st.write("**자금 구성:**")
-    st.write(f"• SGOV 보유: ${sgov_value:,.2f} (약 {sgov_shares_total:.1f}주 @ ${sgov_price:.2f})")
-    st.write(f"  └─ 최소 유지 (7%): ${sgov_minimum:,.2f}")
-    st.write(f"  └─ 사용 가능: ${available_sgov:,.2f}")
-    st.write(f"• **SGOV 매도: {sgov_shares_to_sell_int}주** = ${actual_sgov_amount:,.2f}")
-    st.write(f"• 예수금 전액: ${injection_deposit:,.2f}")
-    if has_new_cash:
-        st.write(f"• 신규 자금: ${injection_new:,.2f}")
+    st.write("**현금성 자산:**")
+    st.write(f"• SGOV: {sgov_qty:.0f}주 × ${sgov_price:.2f} = ${sgov_value:,.2f}")
+    st.write(f"• 예수금: ${cash_deposit:,.2f}")
+    st.write(f"• **현금성 자산 합계: ${cash_base:,.2f}**")
     st.markdown("---")
-    st.write(f"**총 투입 가능: :green[${actual_total_injection:,.2f}]**")
+    
+    st.write(f"**{info['rate']}% 투입 = ${injection_amount:,.2f}**")
+    if sgov_shares_to_sell > 0:
+        st.write(f"• 예수금 사용: ${use_deposit:,.2f}")
+        st.write(f"• **SGOV 매도: {sgov_shares_to_sell}주** = ${sgov_sell_amount:,.2f}")
+    else:
+        st.write(f"• 예수금에서 사용: ${use_deposit:,.2f}")
+    
+    if has_new_cash:
+        st.write(f"• 신규 자금 추가: ${new_cash:,.2f}")
+    
+    st.markdown("---")
+    st.write(f"**총 투입 가능: :green[${total_injection:,.2f}]**")
     
     st.markdown("")
-    st.info("📊 매수 전략 (실행 가능한 주식 수)")
-    st.write(f"• **QQQM: {qqqm_shares}주** = ${qqqm_buy_amount:,.2f}")
-    st.write(f"• **SCHD: {schd_shares}주** = ${schd_buy_amount:,.2f}")
-    st.write(f"• **IAU: {iau_shares}주** = ${iau_buy_amount:,.2f}")
-    st.write(f"• **SGOV: ${sgov_buy_amount:,.2f}**")
+    st.info("📊 매수 전략 (목표 비중 70/15/5/10)")
+    st.write(f"• **QQQM (70%): {qqqm_shares}주** = ${qqqm_buy_amount:,.2f}")
+    st.write(f"• **SCHD (15%): {schd_shares}주** = ${schd_buy_amount:,.2f}")
+    st.write(f"• **IAU (5%): {iau_shares}주** = ${iau_buy_amount:,.2f}")
+    st.write(f"• **SGOV (10%): ${sgov_buy_amount:,.2f}**")
     
     # 실제 사용 금액 합계
     total_actual_use = qqqm_buy_amount + schd_buy_amount + iau_buy_amount + sgov_buy_amount
-    remaining = actual_total_injection - total_actual_use
-    st.caption(f"💡 실제 사용: ${total_actual_use:,.2f} | 잔액: ${remaining:,.2f}")
+    remaining = total_injection - total_actual_use
+    st.caption(f"💡 실제 사용: ${total_actual_use:,.2f} | 잔액: ${remaining:,.2f} (예수금 보관)")
+    
+    # 투입 후 남은 현금 표시
+    remaining_cash = cash_base - injection_amount
+    st.markdown("---")
+    st.write(f"**투입 후 남은 현금: ${remaining_cash:,.2f}**")
+    if puddle_stage < 4:
+        st.caption(f"💡 다음 단계 발생 시 이 금액 기준으로 추가 투입")
 
 # 우선순위 3: Smart Shoulder (리밸런싱)
 elif needs_rebalancing:
@@ -976,257 +1195,222 @@ st.markdown("---")
 st.markdown("---")
 
 # =====================================================================
-# 경제 뉴스 섹션
+# 포트폴리오 등락 원인 분석
 # =====================================================================
-st.header("📰 실시간 경제 뉴스")
+st.header("📊 오늘의 시장 동향")
 
 @st.cache_data(ttl=1800)  # 30분 캐시
-def get_market_news():
-    """Investing.com에서 시장 뉴스 가져오기"""
-    news_items = []
-    
-    # Investing.com 뉴스 URL들
-    urls = {
-        'QQQM/나스닥': 'https://www.investing.com/news/stock-market-news',
-        'S&P 500': 'https://www.investing.com/news/stock-market-news',
-        'VIX/변동성': 'https://www.investing.com/news/stock-market-news'
-    }
-    
+def get_market_summary(symbol, name):
+    """Yahoo Finance에서 종목 관련 뉴스 요약 가져오기"""
     try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        ticker = yf.Ticker(symbol)
+        news = ticker.news
         
-        for category, url in urls.items():
-            try:
-                response = requests.get(url, headers=headers, timeout=10)
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.content, 'html.parser')
-                    
-                    # Investing.com 뉴스 항목 찾기
-                    articles = soup.find_all('article', class_='js-article-item', limit=3)
-                    
-                    for article in articles:
-                        try:
-                            title_elem = article.find('a', class_='title')
-                            if title_elem:
-                                title = title_elem.get_text(strip=True)
-                                link = 'https://www.investing.com' + title_elem.get('href', '')
-                                
-                                # 시간 정보
-                                time_elem = article.find('time')
-                                if time_elem and time_elem.get('datetime'):
-                                    timestamp = datetime.fromisoformat(time_elem['datetime'].replace('Z', '+00:00'))
-                                else:
-                                    timestamp = datetime.now()
-                                
-                                news_items.append({
-                                    'title': title,
-                                    'publisher': 'Investing.com',
-                                    'link': link,
-                                    'timestamp': timestamp,
-                                    'category': category
-                                })
-                        except Exception as e:
-                            continue
-            except Exception as e:
-                continue
-                
-    except Exception as e:
-        st.warning(f"⚠️ 뉴스 수집 중 오류: {str(e)}")
-    
-    # Yahoo Finance 백업 (Investing.com 실패 시)
-    if len(news_items) < 3:
-        try:
-            # QQQM 뉴스
-            qqqm_ticker = yf.Ticker('QQQM')
-            if hasattr(qqqm_ticker, 'news') and qqqm_ticker.news:
-                for item in qqqm_ticker.news[:3]:
-                    news_items.append({
-                        'title': item.get('title', 'No title'),
-                        'publisher': item.get('publisher', 'Unknown'),
-                        'link': item.get('link', '#'),
-                        'timestamp': datetime.fromtimestamp(item.get('providerPublishTime', 0)),
-                        'category': 'QQQM/나스닥'
-                    })
-        except:
-            pass
-    
-    # 시간순 정렬
-    news_items.sort(key=lambda x: x['timestamp'], reverse=True)
-    
-    return news_items[:8]  # 최대 8개
+        if news and len(news) > 0:
+            # 최신 뉴스 3개 제목 가져오기
+            titles = [item.get('title', '') for item in news[:3] if item.get('title')]
+            return titles
+        return []
+    except:
+        return []
 
-def translate_news_summary(title):
-    """뉴스 제목 간단 한글 요약"""
-    # 주요 키워드 번역
-    keywords = {
-        # 상승 관련
-        'rally': '상승',
-        'rallies': '급등',
-        'surge': '급등',
-        'surges': '급등',
-        'jump': '상승',
-        'jumps': '급등',
-        'gain': '상승',
-        'gains': '상승',
-        'rise': '상승',
-        'rises': '상승',
-        'soar': '급등',
-        'soars': '급등',
-        'climb': '상승',
-        'climbs': '상승',
-        'high': '고점',
-        'highs': '고점',
-        'record': '신기록',
-        'all-time high': '사상 최고',
-        'beat': '상회',
-        'beats': '상회',
-        'top': '초과',
-        'tops': '초과',
-        
-        # 하락 관련
-        'fall': '하락',
-        'falls': '하락',
-        'drop': '하락',
-        'drops': '급락',
-        'plunge': '급락',
-        'plunges': '급락',
-        'tumble': '하락',
-        'tumbles': '급락',
-        'slide': '하락',
-        'slides': '하락',
-        'decline': '하락',
-        'declines': '하락',
-        'sink': '하락',
-        'sinks': '급락',
-        'crash': '폭락',
-        'crashes': '폭락',
-        'selloff': '매도',
-        'sell-off': '매도세',
-        'correction': '조정',
-        'pullback': '조정',
-        'low': '저점',
-        'lows': '저점',
-        
-        # 시장 관련
-        'stock': '주식',
-        'stocks': '주식',
-        'market': '시장',
-        'markets': '시장',
-        'wall street': '월가',
-        'dow': '다우',
-        's&p': 'S&P',
-        'nasdaq': '나스닥',
-        'tech': '기술주',
-        'shares': '주가',
-        'investors': '투자자',
-        'traders': '거래자',
-        'earnings': '실적',
-        'profit': '수익',
-        'profits': '수익',
-        'revenue': '매출',
-        
-        # Fed 관련
-        'fed': '연준',
-        'federal reserve': '연방준비제도',
-        'rate': '금리',
-        'rates': '금리',
-        'interest': '금리',
-        'inflation': '인플레이션',
-        'policy': '정책',
-        'decision': '결정',
-        'cut': '인하',
-        'cuts': '인하',
-        'hike': '인상',
-        'hikes': '인상',
-        'hold': '동결',
-        'holds': '동결',
-        
-        # 기타
-        'outlook': '전망',
-        'forecast': '예측',
-        'data': '데이터',
-        'report': '보고서',
-        'warning': '경고',
-        'worry': '우려',
-        'worries': '우려',
-        'concern': '우려',
-        'concerns': '우려',
-        'fear': '공포',
-        'fears': '공포',
-        'volatility': '변동성',
-        'vix': 'VIX',
-        'uncertainty': '불확실성'
+def analyze_movement(change_pct, titles):
+    """등락 원인 분석 (키워드 기반)"""
+    
+    # 키워드 매핑
+    keywords_positive = {
+        'surge': '급등', 'jump': '상승', 'gain': '상승', 'rise': '상승', 
+        'rally': '랠리', 'high': '고점', 'record': '신기록', 'beat': '예상 상회',
+        'strong': '강세', 'boost': '상승', 'climb': '상승', 'soar': '급등',
+        'optimism': '낙관론', 'bullish': '강세', 'buy': '매수세',
+        'earnings': '실적', 'profit': '수익', 'growth': '성장',
+        'fed': '연준', 'rate cut': '금리 인하', 'dovish': '비둘기파',
+        'ai': 'AI', 'tech': '기술주', 'nvidia': '엔비디아', 'apple': '애플',
+        'microsoft': '마이크로소프트', 'amazon': '아마존', 'google': '구글'
     }
     
-    title_lower = title.lower()
-    summary_parts = []
+    keywords_negative = {
+        'fall': '하락', 'drop': '하락', 'decline': '하락', 'slide': '하락',
+        'plunge': '급락', 'tumble': '폭락', 'crash': '폭락', 'sink': '급락',
+        'low': '저점', 'selloff': '매도세', 'sell-off': '매도세',
+        'fear': '공포', 'worry': '우려', 'concern': '우려', 'risk': '리스크',
+        'warning': '경고', 'weak': '약세', 'bearish': '약세',
+        'inflation': '인플레이션', 'rate hike': '금리 인상', 'hawkish': '매파',
+        'tariff': '관세', 'trade war': '무역전쟁', 'recession': '경기침체',
+        'geopolitical': '지정학', 'uncertainty': '불확실성'
+    }
     
-    # 키워드 찾기
-    for eng, kor in keywords.items():
-        if eng in title_lower:
-            if kor not in summary_parts:
-                summary_parts.append(kor)
+    keywords_neutral = {
+        'mixed': '혼조', 'flat': '보합', 'steady': '안정', 'unchanged': '변동 없음',
+        'wait': '관망', 'hold': '유지', 'pause': '일시 중단'
+    }
     
-    # 요약 생성
-    if summary_parts:
-        summary = ' | '.join(summary_parts[:3])  # 최대 3개 키워드
-        return f"💬 {summary}"
+    found_keywords = []
+    all_titles = ' '.join(titles).lower()
+    
+    # 등락 방향에 따라 키워드 우선순위 결정
+    if change_pct > 0.5:
+        primary_keywords = keywords_positive
+        secondary_keywords = keywords_neutral
+    elif change_pct < -0.5:
+        primary_keywords = keywords_negative
+        secondary_keywords = keywords_neutral
     else:
-        return ""
-
-# 뉴스 가져오기
-with st.spinner('📡 최신 뉴스 수집 중...'):
-    market_news = get_market_news()
-
-if market_news:
-    col1, col2 = st.columns(2)
+        primary_keywords = keywords_neutral
+        secondary_keywords = keywords_positive if change_pct > 0 else keywords_negative
     
-    for idx, news in enumerate(market_news):
-        with col1 if idx % 2 == 0 else col2:
-            # 시간 포맷팅
-            time_diff = datetime.now() - news['timestamp']
-            if time_diff.days > 0:
-                time_str = f"{time_diff.days}일 전"
-            elif time_diff.seconds >= 3600:
-                time_str = f"{time_diff.seconds // 3600}시간 전"
-            else:
-                time_str = f"{time_diff.seconds // 60}분 전"
-            
-            # 카테고리 색상 이모지
-            category_icons = {
-                'QQQM/나스닥': '🟢',
-                'S&P 500': '🔵',
-                'VIX/변동성': '🔴',
-                'SCHD': '🟡'
-            }
-            icon = category_icons.get(news['category'], '⚪')
-            
-            # 한글 요약 생성
-            korean_summary = translate_news_summary(news['title'])
-            
-            # 뉴스 카드 표시
-            with st.container():
-                col_cat, col_time = st.columns([3, 1])
-                with col_cat:
-                    st.markdown(f"**{icon} {news['category']}**")
-                with col_time:
-                    st.markdown(f"*{time_str}*")
-                
-                if korean_summary:
-                    st.info(korean_summary)
-                
-                st.markdown(f"[{news['title']}]({news['link']})")
-                st.caption(f"📌 {news['publisher']}")
-                st.markdown("---")
-else:
-    st.info("💡 뉴스를 불러올 수 없습니다. 잠시 후 다시 시도해주세요.")
+    # 1차 키워드 검색
+    for eng, kor in primary_keywords.items():
+        if eng in all_titles and kor not in found_keywords:
+            found_keywords.append(kor)
+            if len(found_keywords) >= 3:
+                break
+    
+    # 부족하면 2차 키워드 검색
+    if len(found_keywords) < 2:
+        for eng, kor in secondary_keywords.items():
+            if eng in all_titles and kor not in found_keywords:
+                found_keywords.append(kor)
+                if len(found_keywords) >= 3:
+                    break
+    
+    return found_keywords
+
+def get_movement_reason(symbol, name, change_pct):
+    """종목별 등락 원인 요약"""
+    titles = get_market_summary(symbol, name)
+    
+    if not titles:
+        if change_pct > 0.5:
+            return "시장 전반적 강세"
+        elif change_pct < -0.5:
+            return "시장 전반적 약세"
+        else:
+            return "뚜렷한 방향성 없음"
+    
+    keywords = analyze_movement(change_pct, titles)
+    
+    if keywords:
+        return ' / '.join(keywords)
+    else:
+        if change_pct > 0.5:
+            return "기술적 반등 또는 시장 강세"
+        elif change_pct < -0.5:
+            return "차익실현 또는 시장 약세"
+        else:
+            return "관망세 지속"
+
+# 등락 원인 분석 실행
+with st.spinner('📡 시장 동향 분석 중...'):
+    qqqm_reason = get_movement_reason('QQQM', 'QQQM', qqqm_data['change_pct'])
+    schd_reason = get_movement_reason('SCHD', 'SCHD', schd_data['change_pct'])
+    iau_reason = get_movement_reason('IAU', 'IAU', iau_data['change_pct'])
+    
+    # VIX는 방향 해석이 반대
+    if vix_data:
+        vix_reason = get_movement_reason('^VIX', 'VIX', vix_data['change_pct'])
+    else:
+        vix_reason = "데이터 없음"
+
+# 결과 표시
+col1, col2 = st.columns(2)
+
+with col1:
+    # QQQM
+    qqqm_color = "#ef4444" if qqqm_data['change_pct'] >= 0 else "#3b82f6"
+    qqqm_icon = "📈" if qqqm_data['change_pct'] >= 0 else "📉"
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%); 
+                border: 1px solid #10b981; border-radius: 12px; padding: 20px; margin: 10px 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span style="font-size: 1.2em; font-weight: 700; color: #10b981;">🟢 QQQM (나스닥)</span>
+            <span style="font-size: 1.1em; font-weight: 700; color: {qqqm_color};">{qqqm_icon} {qqqm_data['change_pct']:+.2f}%</span>
+        </div>
+        <p style="color: #e2e8f0; margin: 0; font-size: 1em;">💡 {qqqm_reason}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # IAU
+    iau_color = "#ef4444" if iau_data['change_pct'] >= 0 else "#3b82f6"
+    iau_icon = "📈" if iau_data['change_pct'] >= 0 else "📉"
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(251, 191, 36, 0.05) 100%); 
+                border: 1px solid #fbbf24; border-radius: 12px; padding: 20px; margin: 10px 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span style="font-size: 1.2em; font-weight: 700; color: #fbbf24;">🟡 IAU (금)</span>
+            <span style="font-size: 1.1em; font-weight: 700; color: {iau_color};">{iau_icon} {iau_data['change_pct']:+.2f}%</span>
+        </div>
+        <p style="color: #e2e8f0; margin: 0; font-size: 1em;">💡 {iau_reason}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col2:
+    # SCHD
+    schd_color = "#ef4444" if schd_data['change_pct'] >= 0 else "#3b82f6"
+    schd_icon = "📈" if schd_data['change_pct'] >= 0 else "📉"
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(59, 130, 246, 0.05) 100%); 
+                border: 1px solid #3b82f6; border-radius: 12px; padding: 20px; margin: 10px 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span style="font-size: 1.2em; font-weight: 700; color: #3b82f6;">🔵 SCHD (배당)</span>
+            <span style="font-size: 1.1em; font-weight: 700; color: {schd_color};">{schd_icon} {schd_data['change_pct']:+.2f}%</span>
+        </div>
+        <p style="color: #e2e8f0; margin: 0; font-size: 1em;">💡 {schd_reason}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # VIX
+    if vix_data:
+        # VIX는 상승이 부정적, 하락이 긍정적
+        vix_color = "#3b82f6" if vix_data['change_pct'] >= 0 else "#ef4444"
+        vix_icon = "⚠️" if vix_data['change_pct'] >= 0 else "✅"
+        vix_status = "변동성 증가" if vix_data['change_pct'] >= 0 else "변동성 감소"
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(239, 68, 68, 0.05) 100%); 
+                    border: 1px solid #ef4444; border-radius: 12px; padding: 20px; margin: 10px 0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <span style="font-size: 1.2em; font-weight: 700; color: #ef4444;">🔴 VIX (공포지수)</span>
+                <span style="font-size: 1.1em; font-weight: 700; color: {vix_color};">{vix_icon} {vix_data['change_pct']:+.2f}%</span>
+            </div>
+            <p style="color: #e2e8f0; margin: 0; font-size: 1em;">💡 {vix_status} - {vix_reason}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+# 포트폴리오 전체 요약
+st.markdown("<br>", unsafe_allow_html=True)
+
+# 전체 포트폴리오 등락률 계산
+portfolio_change = (
+    (qqqm_data['change_pct'] * 0.70) + 
+    (schd_data['change_pct'] * 0.15) + 
+    (iau_data['change_pct'] * 0.05)
+)
+
+portfolio_color = "#ef4444" if portfolio_change >= 0 else "#3b82f6"
+portfolio_icon = "📈" if portfolio_change >= 0 else "📉"
+
+# 오늘 포트폴리오 손익 계산
+portfolio_daily_change = total_value * (portfolio_change / 100)
+
+st.markdown(f"""
+<div style="background: linear-gradient(135deg, rgba(148, 163, 184, 0.1) 0%, rgba(148, 163, 184, 0.05) 100%); 
+            border: 2px solid #94a3b8; border-radius: 12px; padding: 25px; margin: 15px 0;">
+    <div style="text-align: center;">
+        <p style="font-size: 1em; color: #94a3b8; margin-bottom: 10px;">오늘의 포트폴리오 변동 (가중평균)</p>
+        <p style="font-size: 2em; font-weight: 700; color: {portfolio_color}; margin: 10px 0;">
+            {portfolio_icon} {portfolio_change:+.2f}%
+        </p>
+        <p style="font-size: 1.2em; color: {portfolio_color}; margin: 0;">
+            {'+' if portfolio_daily_change >= 0 else ''}${portfolio_daily_change:,.2f}
+        </p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown("---")
 st.markdown("""
 <p style='text-align: center; color: #94a3b8; font-size: 0.9em;'>
-    📚 TEAM FIRE 25 투자 매뉴얼 V5.6 기반<br>
+    📚 TEAM FIRE 25 투자 매뉴얼 V5.8 기반<br>
     ⚡ 데이터 출처: Yahoo Finance (15-20분 지연)<br>
     ⚠️ 본 대시보드는 투자 참고용이며, 투자 결정은 본인 책임입니다
 </p>

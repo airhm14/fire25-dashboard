@@ -490,6 +490,13 @@ if defcon_triggered:
         <p><strong>VIX:</strong> {vix_data['price']:.2f} (≤ 14.00)</p>
         <p><strong>RSI:</strong> {qqqm_data['rsi']:.2f} (≥ 70)</p>
         <p><strong>조치:</strong> 신규 자금 100% SGOV 투입 (QQQM/SCHD/IAU 매수 금지)</p>
+        <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
+        <p style="font-weight: 700; color: #8b5cf6; font-size: 1.1em;">🔮 이미 SGOV 투입했다면? 다음 액션</p>
+        <div style="background: rgba(139, 92, 246, 0.1); padding: 12px; border-radius: 6px; margin: 10px 0;">
+            <p style="margin: 5px 0;">• <strong>감시:</strong> VIX > 14 또는 RSI < 70 되면 DEFCON 해제</p>
+            <p style="margin: 5px 0;">• <strong>해제 후:</strong> 정상 투자 재개 (목표 비중 70/15/5/10)</p>
+            <p style="margin: 5px 0;">• <strong>기존 포지션:</strong> 유지 (매도 금지)</p>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -513,6 +520,15 @@ if puddle_alert:
     sma_100_val = f"${qqqm_data['sma_100']:.2f}" if pd.notna(qqqm_data['sma_100']) else "N/A"
     sma_200_val = f"${qqqm_data['sma_200']:.2f}" if pd.notna(qqqm_data['sma_200']) else "N/A"
     
+    # 다음 액션 설명 (이미 투입했다면)
+    next_action_info = {
+        1: {"next": "2단계 (100일선 하향돌파)", "watch": "100일선", "next_rate": "남은 현금의 35%"},
+        2: {"next": "3단계 (200일선 하향돌파)", "watch": "200일선", "next_rate": "남은 현금의 50%"},
+        3: {"next": "4단계 (200일선 상향돌파)", "watch": "200일선 회복", "next_rate": "남은 현금 100%"},
+        4: {"next": "정상 운영", "watch": "포트폴리오 비중", "next_rate": "목표 비중대로"}
+    }
+    next_info = next_action_info[puddle_stage]
+    
     st.markdown(f"""
     <div class="warning-box" style="border-color: {info['color']};">
         <div class="warning-title" style="color: {info['color']};">🚨 웅덩이 매수 구간: {info['name']}</div>
@@ -520,7 +536,7 @@ if puddle_alert:
         <p><strong>50일선:</strong> {sma_50_val} | <strong>100일선:</strong> {sma_100_val} | <strong>200일선:</strong> {sma_200_val}</p>
         <p><strong>판단:</strong> {info['desc']}</p>
         <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
-        <p style="font-weight: 700; color: {info['color']}; font-size: 1.1em;">💰 투입 전략 (V5.8)</p>
+        <p style="font-weight: 700; color: {info['color']}; font-size: 1.1em;">💰 현재 투입 전략 (V5.8)</p>
         <div style="background: rgba(251, 191, 36, 0.05); padding: 12px; border-radius: 6px; margin: 10px 0;">
             <p style="margin: 5px 0;">• <strong>현금성 자산:</strong> ${cash_base:,.2f}</p>
             <p style="margin: 5px 0;">  └─ SGOV: ${sgov_value:,.2f} + 예수금: ${cash_deposit:,.2f}</p>
@@ -528,6 +544,14 @@ if puddle_alert:
             <p style="margin: 5px 0; font-size: 1.2em; color: {info['color']};">• <strong>투입 금액:</strong> ${injection_amount:,.2f}</p>
         </div>
         <p style="color: #10b981; font-weight: 700; margin-top: 10px;">💡 + 신규 자금도 함께 투입 (목표 비중 70/15/5/10)</p>
+        <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
+        <p style="font-weight: 700; color: #8b5cf6; font-size: 1.1em;">🔮 이미 투입했다면? 다음 액션</p>
+        <div style="background: rgba(139, 92, 246, 0.1); padding: 12px; border-radius: 6px; margin: 10px 0;">
+            <p style="margin: 5px 0;">• <strong>다음 단계:</strong> {next_info['next']}</p>
+            <p style="margin: 5px 0;">• <strong>감시 포인트:</strong> {next_info['watch']}</p>
+            <p style="margin: 5px 0;">• <strong>다음 투입률:</strong> {next_info['next_rate']}</p>
+            <p style="margin: 5px 0; color: #94a3b8;">• <strong>신규 자금:</strong> 발생 시 즉시 투입 (70/15/5/10)</p>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -542,7 +566,12 @@ if rebalancing_needed:
         <p><strong>전고점 상태:</strong> {'⚠️ 최근 신고가 갱신' if condition_3_after_high else '✅ 신고가 미갱신'}</p>
         <hr style="border-color: rgba(251, 191, 36, 0.3); margin: 10px 0;">
         <p style="color: #10b981;"><strong>📋 현재 조치:</strong> 상승장 중이므로 Smart Shoulder 대기</p>
-        <p style="color: #94a3b8; font-size: 0.9em;">💡 20일선 하향돌파 + 전고점 갱신 후에만 리밸런싱 실행</p>
+        <hr style="border-color: rgba(251, 191, 36, 0.3); margin: 10px 0;">
+        <p style="font-weight: 700; color: #8b5cf6; font-size: 1em;">🔮 다음 액션</p>
+        <div style="background: rgba(139, 92, 246, 0.1); padding: 10px; border-radius: 6px; margin: 8px 0;">
+            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>감시:</strong> QQQM이 20일선 하향돌파하면 Smart Shoulder 발동</p>
+            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>신규 자금:</strong> 평시대로 투입 (70/15/5/10)</p>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -557,7 +586,14 @@ if smart_shoulder_triggered:
         <p>✅ 조건 2: 20일선 하향돌파 (${qqqm_data['sma_20']:.2f})</p>
         <p>✅ 조건 3: 최근 전고점 갱신 후</p>
         <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 10px 0;">
-        <p style="color: #ef4444;"><strong>📋 조치:</strong> 즉시 QQQM 매도 → SCHD/IAU/SGOV 재배분</p>
+        <p style="color: #ef4444;"><strong>📋 조치:</strong> 전체 자산을 70/15/5/10으로 리밸런싱</p>
+        <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 10px 0;">
+        <p style="font-weight: 700; color: #8b5cf6; font-size: 1em;">🔮 리밸런싱 완료 후 다음 액션</p>
+        <div style="background: rgba(139, 92, 246, 0.1); padding: 10px; border-radius: 6px; margin: 8px 0;">
+            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>완료 후:</strong> 정상 운영 복귀</p>
+            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>신규 자금:</strong> 목표 비중대로 투입 (70/15/5/10)</p>
+            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>감시:</strong> QQQM 75% 다시 초과 시 재발동</p>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1585,34 +1621,97 @@ portfolio_daily_change = total_value * (portfolio_change / 100)
 
 # 색상 결정 (한국식: 상승=빨강, 하락=파랑)
 port_color = "#ef4444" if portfolio_change >= 0 else "#3b82f6"
-port_bg = "rgba(239, 68, 68, 0.1)" if portfolio_change >= 0 else "rgba(59, 130, 246, 0.1)"
+port_bg = "rgba(239, 68, 68, 0.05)" if portfolio_change >= 0 else "rgba(59, 130, 246, 0.05)"
 port_icon = "📈" if portfolio_change >= 0 else "📉"
 
-st.markdown(f"""
-<div style="background: {port_bg}; border: 2px solid {port_color}; border-radius: 16px; padding: 25px; margin-bottom: 30px;">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-        <div>
-            <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">오늘의 포트폴리오</p>
-            <p style="color: {port_color}; font-size: 2.5em; font-weight: 800; margin: 5px 0;">
-                {port_icon} {portfolio_change:+.2f}%
-            </p>
-        </div>
-        <div style="text-align: right;">
-            <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">예상 손익</p>
-            <p style="color: {port_color}; font-size: 2em; font-weight: 700; margin: 5px 0;">
-                {'+' if portfolio_daily_change >= 0 else ''}${portfolio_daily_change:,.0f}
-            </p>
-        </div>
-    </div>
-    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
-        <p style="color: #cbd5e1; font-size: 0.9em; margin: 0;">
-            QQQM {qqqm_data['change_pct']:+.2f}% × 70% &nbsp;|&nbsp; 
-            SCHD {schd_data['change_pct']:+.2f}% × 15% &nbsp;|&nbsp; 
-            IAU {iau_data['change_pct']:+.2f}% × 5%
+# 시장 한줄 요약 생성
+def generate_market_summary():
+    # 주요 요인 수집
+    all_factors = []
+    for analysis in [qqqm_analysis, schd_analysis, iau_analysis]:
+        for f in analysis['factors']:
+            if f not in all_factors:
+                all_factors.append(f)
+    
+    # 시장 방향 판단
+    if portfolio_change > 1.5:
+        market_mood = "강한 상승장"
+        mood_emoji = "🚀"
+    elif portfolio_change > 0.5:
+        market_mood = "상승장"
+        mood_emoji = "📈"
+    elif portfolio_change > -0.5:
+        market_mood = "혼조세"
+        mood_emoji = "➖"
+    elif portfolio_change > -1.5:
+        market_mood = "하락장"
+        mood_emoji = "📉"
+    else:
+        market_mood = "강한 하락장"
+        mood_emoji = "🔻"
+    
+    # 주요 이슈 추출 (첫 2개)
+    key_issues = []
+    for f in all_factors[:2]:
+        # 이모지 제거하고 텍스트만
+        issue = f.replace("🔺 ", "").replace("🔻 ", "").replace("➖ ", "")
+        key_issues.append(issue)
+    
+    if key_issues:
+        return f"{mood_emoji} {market_mood} | 주요 이슈: {', '.join(key_issues)}"
+    else:
+        return f"{mood_emoji} {market_mood}"
+
+market_summary_text = generate_market_summary()
+
+# 포트폴리오 요약 카드
+col1, col2, col3 = st.columns([2, 2, 3])
+
+with col1:
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, {port_bg} 0%, rgba(30, 41, 59, 0.8) 100%); 
+                border: 1px solid {port_color}; border-radius: 12px; padding: 20px; text-align: center;">
+        <p style="color: #94a3b8; font-size: 0.85em; margin: 0 0 5px 0;">오늘의 수익률</p>
+        <p style="color: {port_color}; font-size: 2.2em; font-weight: 800; margin: 0;">
+            {port_icon} {portfolio_change:+.2f}%
         </p>
     </div>
+    """, unsafe_allow_html=True)
+
+with col2:
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, {port_bg} 0%, rgba(30, 41, 59, 0.8) 100%); 
+                border: 1px solid {port_color}; border-radius: 12px; padding: 20px; text-align: center;">
+        <p style="color: #94a3b8; font-size: 0.85em; margin: 0 0 5px 0;">예상 손익</p>
+        <p style="color: {port_color}; font-size: 2.2em; font-weight: 800; margin: 0;">
+            {'+' if portfolio_daily_change >= 0 else ''}${portfolio_daily_change:,.0f}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col3:
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(30, 41, 59, 0.7) 100%); 
+                border: 1px solid #475569; border-radius: 12px; padding: 20px;">
+        <p style="color: #94a3b8; font-size: 0.85em; margin: 0 0 8px 0;">📋 시장 한줄 요약</p>
+        <p style="color: #e2e8f0; font-size: 1.1em; font-weight: 600; margin: 0; line-height: 1.4;">
+            {market_summary_text}
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# 세부 내역
+st.markdown(f"""
+<div style="background: rgba(30, 41, 59, 0.5); border-radius: 8px; padding: 12px 15px; margin-top: 15px;">
+    <p style="color: #94a3b8; font-size: 0.9em; margin: 0; text-align: center;">
+        <span style="color: #10b981;">QQQM</span> {qqqm_data['change_pct']:+.2f}% × 70% &nbsp;&nbsp;|&nbsp;&nbsp; 
+        <span style="color: #3b82f6;">SCHD</span> {schd_data['change_pct']:+.2f}% × 15% &nbsp;&nbsp;|&nbsp;&nbsp; 
+        <span style="color: #fbbf24;">IAU</span> {iau_data['change_pct']:+.2f}% × 5%
+    </p>
 </div>
 """, unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
 
 # =====================================================================
 # 종목별 상세 분석

@@ -299,42 +299,65 @@ with st.spinner('📡 실시간 데이터 수신 중...'):
     vix_data = get_stock_data('^VIX', period="1mo")  # VIX는 1개월만
 
 # Fear & Greed Index 가져오기
-@st.cache_data(ttl=3600)  # 1시간 캐시
+@st.cache_data(ttl=1800)  # 30분 캐시
 def get_fear_greed_index():
-    """CNN Fear & Greed Index 가져오기 (대안 API 사용)"""
+    """CNN Fear & Greed Index 가져오기"""
+    
+    # 방법 1: CNN 공식 API
     try:
-        import requests
-        # Alternative.me API (무료, 안정적)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Referer': 'https://edition.cnn.com/markets/fear-and-greed'
+        }
         response = requests.get(
-            "https://api.alternative.me/fng/?limit=1",
+            "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+            headers=headers,
             timeout=10
         )
         if response.status_code == 200:
             data = response.json()
-            if data and 'data' in data and len(data['data']) > 0:
-                fng_data = data['data'][0]
+            if data and 'fear_and_greed' in data:
+                fng = data['fear_and_greed']
+                score = fng.get('score', None)
+                if score is not None:
+                    prev_close = None
+                    historical = data.get('fear_and_greed_historical', {})
+                    if historical and 'previous_close' in historical:
+                        prev_close = historical['previous_close']
+                    
+                    return {
+                        'value': int(round(score)),
+                        'classification': fng.get('rating', 'Neutral'),
+                        'previous': prev_close,
+                        'source': 'CNN'
+                    }
+    except:
+        pass
+    
+    # 방법 2: CNN 대체 엔드포인트
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+        }
+        response = requests.get(
+            "https://production.dataviz.cnn.io/index/fearandgreed/current",
+            headers=headers,
+            timeout=10
+        )
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'score' in data:
                 return {
-                    'value': int(fng_data['value']),
-                    'classification': fng_data['value_classification'],
-                    'timestamp': fng_data['timestamp']
+                    'value': int(round(data['score'])),
+                    'classification': data.get('rating', 'Neutral'),
+                    'previous': data.get('previous_close', None),
+                    'source': 'CNN'
                 }
     except:
         pass
     
-    # VIX 기반 추정 (백업)
-    if vix_data:
-        vix_val = vix_data['price']
-        if vix_val <= 12:
-            return {'value': 80, 'classification': 'Extreme Greed', 'timestamp': None}
-        elif vix_val <= 15:
-            return {'value': 65, 'classification': 'Greed', 'timestamp': None}
-        elif vix_val <= 20:
-            return {'value': 50, 'classification': 'Neutral', 'timestamp': None}
-        elif vix_val <= 25:
-            return {'value': 35, 'classification': 'Fear', 'timestamp': None}
-        else:
-            return {'value': 20, 'classification': 'Extreme Fear', 'timestamp': None}
-    
+    # 데이터 없음
     return None
 
 with st.spinner('📡 Fear & Greed Index 조회 중...'):
@@ -402,7 +425,7 @@ with st.sidebar:
 # =====================================================================
 st.header("💹 실시간 시세")
 
-col1, col2, col3, col4, col5, col6 = st.columns(6)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     change_class = 'positive' if qqqm_data['change'] >= 0 else 'negative'
@@ -443,57 +466,109 @@ with col4:
         st.metric(label="SGOV (현금성)", value=f"${sgov_price:.2f}")
         st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>보유: {sgov_qty:.0f}주</p>", unsafe_allow_html=True)
 
-with col5:
+# 시장 심리 지표 (VIX + Fear & Greed)
+st.markdown("<br>", unsafe_allow_html=True)
+col_vix, col_fng = st.columns(2)
+
+with col_vix:
     if vix_data:
-        st.metric(
-            label="VIX (공포 지수)",
-            value=f"{vix_data['price']:.2f}",
-            delta=f"{vix_data['change_pct']:+.2f}%"
-        )
-        if vix_data['price'] <= 14.0:
-            st.markdown("<p style='color: #ef4444; font-weight: 700; font-size: 0.85em;'>⚠️ Defcon 조건</p>", unsafe_allow_html=True)
+        vix_color = "#10b981" if vix_data['price'] <= 20 else ("#fbbf24" if vix_data['price'] <= 30 else "#ef4444")
+        vix_status = "안정" if vix_data['price'] <= 14 else ("정상" if vix_data['price'] <= 20 else ("주의" if vix_data['price'] <= 30 else "위험"))
+        defcon_warning = "⚠️ DEFCON 조건!" if vix_data['price'] <= 14.0 else ""
+        
+        st.markdown(f"""
+        <div style="background: #1e293b; border: 2px solid {vix_color}; border-radius: 12px; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">VIX (변동성 지수)</p>
+                    <p style="color: {vix_color}; font-size: 2.5em; font-weight: 800; margin: 5px 0;">{vix_data['price']:.2f}</p>
+                    <p style="color: {'#ef4444' if vix_data['change_pct'] > 0 else '#10b981'}; font-size: 1em; margin: 0;">
+                        {'📈' if vix_data['change_pct'] > 0 else '📉'} {vix_data['change_pct']:+.2f}%
+                    </p>
+                </div>
+                <div style="text-align: right;">
+                    <p style="color: {vix_color}; font-size: 1.5em; font-weight: 700; margin: 0;">{vix_status}</p>
+                    <p style="color: #ef4444; font-size: 1em; font-weight: 700; margin: 5px 0;">{defcon_warning}</p>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     else:
         st.warning("VIX 데이터 없음")
 
-with col6:
+with col_fng:
     if fng_data:
         fng_value = fng_data['value']
-        fng_class = fng_data['classification']
         
         # 색상 및 한글 변환
         if fng_value >= 75:
-            fng_color = "#ef4444"  # 극단적 탐욕 - 빨강
+            fng_color = "#ef4444"
             fng_label = "극단적 탐욕"
             fng_icon = "🔥"
+            fng_advice = "시장 과열 주의"
         elif fng_value >= 55:
-            fng_color = "#f97316"  # 탐욕 - 주황
+            fng_color = "#f97316"
             fng_label = "탐욕"
             fng_icon = "😀"
+            fng_advice = "상승 추세"
         elif fng_value >= 45:
-            fng_color = "#fbbf24"  # 중립 - 노랑
+            fng_color = "#fbbf24"
             fng_label = "중립"
             fng_icon = "😐"
+            fng_advice = "관망세"
         elif fng_value >= 25:
-            fng_color = "#3b82f6"  # 공포 - 파랑
+            fng_color = "#3b82f6"
             fng_label = "공포"
             fng_icon = "😰"
+            fng_advice = "매수 기회 탐색"
         else:
-            fng_color = "#8b5cf6"  # 극단적 공포 - 보라
+            fng_color = "#8b5cf6"
             fng_label = "극단적 공포"
             fng_icon = "😱"
+            fng_advice = "적극 매수 고려"
+        
+        # 전일 대비 변화
+        prev_value = fng_data.get('previous')
+        if prev_value:
+            try:
+                prev_val = int(prev_value)
+                fng_change = fng_value - prev_val
+                fng_change_str = f"{'📈' if fng_change > 0 else '📉'} {fng_change:+d} (전일比)"
+            except:
+                fng_change_str = ""
+        else:
+            fng_change_str = ""
         
         st.markdown(f"""
-        <div style="text-align: center;">
-            <p style="color: #94a3b8; font-size: 0.85em; margin: 0 0 5px 0;">Fear & Greed</p>
-            <p style="color: {fng_color}; font-size: 2em; font-weight: 800; margin: 0;">{fng_value}</p>
-            <p style="color: {fng_color}; font-size: 0.9em; font-weight: 600; margin: 3px 0;">{fng_icon} {fng_label}</p>
+        <div style="background: #1e293b; border: 2px solid {fng_color}; border-radius: 12px; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">Fear & Greed Index</p>
+                    <p style="color: {fng_color}; font-size: 2.5em; font-weight: 800; margin: 5px 0;">{fng_value}</p>
+                    <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">{fng_change_str}</p>
+                </div>
+                <div style="text-align: right;">
+                    <p style="font-size: 1.8em; margin: 0;">{fng_icon}</p>
+                    <p style="color: {fng_color}; font-size: 1.3em; font-weight: 700; margin: 5px 0;">{fng_label}</p>
+                    <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">{fng_advice}</p>
+                </div>
+            </div>
         </div>
         """, unsafe_allow_html=True)
     else:
         st.markdown("""
-        <div style="text-align: center;">
-            <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">Fear & Greed</p>
-            <p style="color: #64748b; font-size: 1em; margin: 5px 0;">데이터 없음</p>
+        <div style="background: #1e293b; border: 2px solid #475569; border-radius: 12px; padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">Fear & Greed Index</p>
+                    <p style="color: #64748b; font-size: 2.5em; font-weight: 800; margin: 5px 0;">N/A</p>
+                    <p style="color: #475569; font-size: 0.85em; margin: 0;">CNN 연결 실패</p>
+                </div>
+                <div style="text-align: right;">
+                    <p style="font-size: 1.8em; margin: 0;">❓</p>
+                    <p style="color: #64748b; font-size: 1.3em; font-weight: 700; margin: 5px 0;">데이터 없음</p>
+                </div>
+            </div>
         </div>
         """, unsafe_allow_html=True)
 

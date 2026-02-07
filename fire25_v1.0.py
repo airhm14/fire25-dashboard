@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
 import time
+import requests
 
 # =====================================================================
 # 페이지 설정
@@ -297,6 +298,48 @@ with st.spinner('📡 실시간 데이터 수신 중...'):
     sgov_data = get_stock_data('SGOV', period="1mo")  # SGOV 가격 조회
     vix_data = get_stock_data('^VIX', period="1mo")  # VIX는 1개월만
 
+# Fear & Greed Index 가져오기
+@st.cache_data(ttl=3600)  # 1시간 캐시
+def get_fear_greed_index():
+    """CNN Fear & Greed Index 가져오기 (대안 API 사용)"""
+    try:
+        import requests
+        # Alternative.me API (무료, 안정적)
+        response = requests.get(
+            "https://api.alternative.me/fng/?limit=1",
+            timeout=10
+        )
+        if response.status_code == 200:
+            data = response.json()
+            if data and 'data' in data and len(data['data']) > 0:
+                fng_data = data['data'][0]
+                return {
+                    'value': int(fng_data['value']),
+                    'classification': fng_data['value_classification'],
+                    'timestamp': fng_data['timestamp']
+                }
+    except:
+        pass
+    
+    # VIX 기반 추정 (백업)
+    if vix_data:
+        vix_val = vix_data['price']
+        if vix_val <= 12:
+            return {'value': 80, 'classification': 'Extreme Greed', 'timestamp': None}
+        elif vix_val <= 15:
+            return {'value': 65, 'classification': 'Greed', 'timestamp': None}
+        elif vix_val <= 20:
+            return {'value': 50, 'classification': 'Neutral', 'timestamp': None}
+        elif vix_val <= 25:
+            return {'value': 35, 'classification': 'Fear', 'timestamp': None}
+        else:
+            return {'value': 20, 'classification': 'Extreme Fear', 'timestamp': None}
+    
+    return None
+
+with st.spinner('📡 Fear & Greed Index 조회 중...'):
+    fng_data = get_fear_greed_index()
+
 # 데이터 검증
 if not all([qqqm_data, schd_data, iau_data]):
     st.error("⚠️ 일부 데이터를 가져오지 못했습니다. 새로고침 버튼을 눌러주세요.")
@@ -359,7 +402,7 @@ with st.sidebar:
 # =====================================================================
 st.header("💹 실시간 시세")
 
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
     change_class = 'positive' if qqqm_data['change'] >= 0 else 'negative'
@@ -368,7 +411,7 @@ with col1:
         value=f"${qqqm_data['price']:.2f}",
         delta=f"{qqqm_data['change_pct']:+.2f}%"
     )
-    st.markdown(f"<p style='font-size: 0.9em; color: #94a3b8;'>거래량: {qqqm_data['volume']:,.0f}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>거래량: {qqqm_data['volume']:,.0f}</p>", unsafe_allow_html=True)
 
 with col2:
     change_class = 'positive' if schd_data['change'] >= 0 else 'negative'
@@ -377,7 +420,7 @@ with col2:
         value=f"${schd_data['price']:.2f}",
         delta=f"{schd_data['change_pct']:+.2f}%"
     )
-    st.markdown(f"<p style='font-size: 0.9em; color: #94a3b8;'>거래량: {schd_data['volume']:,.0f}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>거래량: {schd_data['volume']:,.0f}</p>", unsafe_allow_html=True)
 
 with col3:
     change_class = 'positive' if iau_data['change'] >= 0 else 'negative'
@@ -386,7 +429,7 @@ with col3:
         value=f"${iau_data['price']:.2f}",
         delta=f"{iau_data['change_pct']:+.2f}%"
     )
-    st.markdown(f"<p style='font-size: 0.9em; color: #94a3b8;'>거래량: {iau_data['volume']:,.0f}</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>거래량: {iau_data['volume']:,.0f}</p>", unsafe_allow_html=True)
 
 with col4:
     if sgov_data:
@@ -395,10 +438,10 @@ with col4:
             value=f"${sgov_price:.2f}",
             delta=f"{sgov_data['change_pct']:+.2f}%"
         )
-        st.markdown(f"<p style='font-size: 0.9em; color: #94a3b8;'>보유: {sgov_qty:.0f}주</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>보유: {sgov_qty:.0f}주</p>", unsafe_allow_html=True)
     else:
         st.metric(label="SGOV (현금성)", value=f"${sgov_price:.2f}")
-        st.markdown(f"<p style='font-size: 0.9em; color: #94a3b8;'>보유: {sgov_qty:.0f}주</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>보유: {sgov_qty:.0f}주</p>", unsafe_allow_html=True)
 
 with col5:
     if vix_data:
@@ -408,9 +451,51 @@ with col5:
             delta=f"{vix_data['change_pct']:+.2f}%"
         )
         if vix_data['price'] <= 14.0:
-            st.markdown("<p style='color: #ef4444; font-weight: 700;'>⚠️ Defcon 조건</p>", unsafe_allow_html=True)
+            st.markdown("<p style='color: #ef4444; font-weight: 700; font-size: 0.85em;'>⚠️ Defcon 조건</p>", unsafe_allow_html=True)
     else:
         st.warning("VIX 데이터 없음")
+
+with col6:
+    if fng_data:
+        fng_value = fng_data['value']
+        fng_class = fng_data['classification']
+        
+        # 색상 및 한글 변환
+        if fng_value >= 75:
+            fng_color = "#ef4444"  # 극단적 탐욕 - 빨강
+            fng_label = "극단적 탐욕"
+            fng_icon = "🔥"
+        elif fng_value >= 55:
+            fng_color = "#f97316"  # 탐욕 - 주황
+            fng_label = "탐욕"
+            fng_icon = "😀"
+        elif fng_value >= 45:
+            fng_color = "#fbbf24"  # 중립 - 노랑
+            fng_label = "중립"
+            fng_icon = "😐"
+        elif fng_value >= 25:
+            fng_color = "#3b82f6"  # 공포 - 파랑
+            fng_label = "공포"
+            fng_icon = "😰"
+        else:
+            fng_color = "#8b5cf6"  # 극단적 공포 - 보라
+            fng_label = "극단적 공포"
+            fng_icon = "😱"
+        
+        st.markdown(f"""
+        <div style="text-align: center;">
+            <p style="color: #94a3b8; font-size: 0.85em; margin: 0 0 5px 0;">Fear & Greed</p>
+            <p style="color: {fng_color}; font-size: 2em; font-weight: 800; margin: 0;">{fng_value}</p>
+            <p style="color: {fng_color}; font-size: 0.9em; font-weight: 600; margin: 3px 0;">{fng_icon} {fng_label}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="text-align: center;">
+            <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">Fear & Greed</p>
+            <p style="color: #64748b; font-size: 1em; margin: 5px 0;">데이터 없음</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 st.markdown("---")
 

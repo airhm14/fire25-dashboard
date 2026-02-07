@@ -1669,10 +1669,10 @@ col1, col2, col3 = st.columns([2, 2, 3])
 
 with col1:
     st.markdown(f"""
-    <div style="background: linear-gradient(135deg, {port_bg} 0%, rgba(30, 41, 59, 0.8) 100%); 
-                border: 1px solid {port_color}; border-radius: 12px; padding: 20px; text-align: center;">
-        <p style="color: #94a3b8; font-size: 0.85em; margin: 0 0 5px 0;">오늘의 수익률</p>
-        <p style="color: {port_color}; font-size: 2.2em; font-weight: 800; margin: 0;">
+    <div style="background: #1e293b; 
+                border: 2px solid {port_color}; border-radius: 12px; padding: 20px; text-align: center;">
+        <p style="color: #cbd5e1; font-size: 0.9em; margin: 0 0 8px 0;">오늘의 수익률</p>
+        <p style="color: {port_color}; font-size: 2.4em; font-weight: 800; margin: 0;">
             {port_icon} {portfolio_change:+.2f}%
         </p>
     </div>
@@ -1680,10 +1680,10 @@ with col1:
 
 with col2:
     st.markdown(f"""
-    <div style="background: linear-gradient(135deg, {port_bg} 0%, rgba(30, 41, 59, 0.8) 100%); 
-                border: 1px solid {port_color}; border-radius: 12px; padding: 20px; text-align: center;">
-        <p style="color: #94a3b8; font-size: 0.85em; margin: 0 0 5px 0;">예상 손익</p>
-        <p style="color: {port_color}; font-size: 2.2em; font-weight: 800; margin: 0;">
+    <div style="background: #1e293b; 
+                border: 2px solid {port_color}; border-radius: 12px; padding: 20px; text-align: center;">
+        <p style="color: #cbd5e1; font-size: 0.9em; margin: 0 0 8px 0;">예상 손익</p>
+        <p style="color: {port_color}; font-size: 2.4em; font-weight: 800; margin: 0;">
             {'+' if portfolio_daily_change >= 0 else ''}${portfolio_daily_change:,.0f}
         </p>
     </div>
@@ -1691,10 +1691,10 @@ with col2:
 
 with col3:
     st.markdown(f"""
-    <div style="background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(30, 41, 59, 0.7) 100%); 
-                border: 1px solid #475569; border-radius: 12px; padding: 20px;">
-        <p style="color: #94a3b8; font-size: 0.85em; margin: 0 0 8px 0;">📋 시장 한줄 요약</p>
-        <p style="color: #e2e8f0; font-size: 1.1em; font-weight: 600; margin: 0; line-height: 1.4;">
+    <div style="background: #1e293b; 
+                border: 2px solid #10b981; border-radius: 12px; padding: 20px;">
+        <p style="color: #10b981; font-size: 0.9em; margin: 0 0 10px 0; font-weight: 600;">📋 시장 한줄 요약</p>
+        <p style="color: #f1f5f9; font-size: 1.15em; font-weight: 700; margin: 0; line-height: 1.5;">
             {market_summary_text}
         </p>
     </div>
@@ -1702,11 +1702,11 @@ with col3:
 
 # 세부 내역
 st.markdown(f"""
-<div style="background: rgba(30, 41, 59, 0.5); border-radius: 8px; padding: 12px 15px; margin-top: 15px;">
-    <p style="color: #94a3b8; font-size: 0.9em; margin: 0; text-align: center;">
-        <span style="color: #10b981;">QQQM</span> {qqqm_data['change_pct']:+.2f}% × 70% &nbsp;&nbsp;|&nbsp;&nbsp; 
-        <span style="color: #3b82f6;">SCHD</span> {schd_data['change_pct']:+.2f}% × 15% &nbsp;&nbsp;|&nbsp;&nbsp; 
-        <span style="color: #fbbf24;">IAU</span> {iau_data['change_pct']:+.2f}% × 5%
+<div style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px 15px; margin-top: 15px;">
+    <p style="color: #e2e8f0; font-size: 0.95em; margin: 0; text-align: center;">
+        <span style="color: #10b981; font-weight: 600;">QQQM</span> {qqqm_data['change_pct']:+.2f}% × 70% &nbsp;&nbsp;|&nbsp;&nbsp; 
+        <span style="color: #3b82f6; font-weight: 600;">SCHD</span> {schd_data['change_pct']:+.2f}% × 15% &nbsp;&nbsp;|&nbsp;&nbsp; 
+        <span style="color: #fbbf24; font-weight: 600;">IAU</span> {iau_data['change_pct']:+.2f}% × 5%
     </p>
 </div>
 """, unsafe_allow_html=True)

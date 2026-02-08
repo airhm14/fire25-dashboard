@@ -717,6 +717,16 @@ if puddle_alert:
 
 if rebalancing_needed:
     excess = qqqm_pct - 70
+    
+    # 다음 액션 조건 설명 생성
+    missing_conditions = []
+    if not condition_2_below_sma20:
+        missing_conditions.append("20일선 하향돌파")
+    if not condition_3_after_high:
+        missing_conditions.append("전고점 갱신")
+    
+    next_action_text = " + ".join(missing_conditions) if missing_conditions else "조건 충족"
+    
     st.markdown(f"""
     <div class="info-box">
         <div class="warning-title">⚠️ QQQM 비중 초과 (75% 이상)</div>
@@ -729,7 +739,7 @@ if rebalancing_needed:
         <hr style="border-color: rgba(251, 191, 36, 0.3); margin: 10px 0;">
         <p style="font-weight: 700; color: #8b5cf6; font-size: 1em;">🔮 다음 액션</p>
         <div style="background: rgba(139, 92, 246, 0.1); padding: 10px; border-radius: 6px; margin: 8px 0;">
-            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>감시:</strong> QQQM이 20일선 하향돌파하면 Smart Shoulder 발동</p>
+            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>Smart Shoulder 발동 조건:</strong> {next_action_text} 시</p>
             <p style="margin: 3px 0; font-size: 0.95em;">• <strong>신규 자금:</strong> 평시대로 투입 (70/15/5/10)</p>
         </div>
     </div>
@@ -1118,22 +1128,27 @@ st.subheader("🎯 현재 상황 진단")
 
 situation_badges = []
 if is_defcon:
-    situation_badges.append("🚨 <span style='background: #ef4444; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>DEFCON 발동</span>")
+    situation_badges.append("🚨 <span style='background: #ef4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>DEFCON 발동</span>")
 if is_puddle:
     stage_colors = {1: "#fbbf24", 2: "#f97316", 3: "#ef4444", 4: "#10b981"}
     stage_names = {1: "1단계(50일선)", 2: "2단계(100일선)", 3: "3단계(200일선↓)", 4: "4단계(200일선↑)"}
-    situation_badges.append(f"🚨 <span style='background: {stage_colors[puddle_stage]}; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>웅덩이 {stage_names[puddle_stage]}</span>")
+    situation_badges.append(f"🚨 <span style='background: {stage_colors[puddle_stage]}; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>웅덩이 {stage_names[puddle_stage]}</span>")
 if is_smart_shoulder:
-    situation_badges.append("🚨 <span style='background: #ef4444; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>Smart Shoulder 발동</span>")
+    situation_badges.append("🚨 <span style='background: #ef4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>Smart Shoulder 발동</span>")
 elif is_over_75:
-    situation_badges.append("⚠️ <span style='background: #fbbf24; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>QQQM 75%↑ (대기)</span>")
+    situation_badges.append("⚠️ <span style='background: #fbbf24; color: #1e293b; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>QQQM 75%↑ (대기)</span>")
 if has_new_cash:
-    situation_badges.append("💰 <span style='background: #3b82f6; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>신규 자금 ${:,.0f}</span>".format(new_cash))
+    situation_badges.append("💰 <span style='background: #3b82f6; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>신규 자금 ${:,.0f}</span>".format(new_cash))
 
 if situation_badges:
-    st.markdown(" ".join(situation_badges), unsafe_allow_html=True)
+    # 각 배지를 줄바꿈으로 분리하여 세로로 표시 (모바일 대응)
+    badges_html = "<div style='display: flex; flex-direction: column; gap: 8px; align-items: flex-start;'>"
+    for badge in situation_badges:
+        badges_html += f"<div>{badge}</div>"
+    badges_html += "</div>"
+    st.markdown(badges_html, unsafe_allow_html=True)
 else:
-    st.markdown("<span style='background: #10b981; color: white; padding: 4px 12px; border-radius: 4px; font-weight: 700;'>✅ 정상 운영</span>", unsafe_allow_html=True)
+    st.markdown("<span style='background: #10b981; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700;'>✅ 정상 운영</span>", unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 

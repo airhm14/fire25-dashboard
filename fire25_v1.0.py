@@ -588,19 +588,24 @@ if vix_data and vix_data['price'] <= 14.0 and qqqm_data['rsi'] >= 70:
 puddle_stage = 0
 puddle_alert = False
 puddle_cooldown_active = False  # 쿨다운 중인지 여부
+cooldown_info = ""  # 쿨다운 상세 정보
 
 # 30일 쿨다운 체크 함수
 def check_30day_cooldown(df, sma_column, direction='below'):
     """
     지난 30일 동안 동일한 이동평균선 돌파가 있었는지 확인
     direction: 'below' = 하향돌파, 'above' = 상향돌파
-    Returns: True if 쿨다운 중 (30일 내 동일 신호 있음), False if 신규 신호
+    Returns: (is_cooldown, days_since_signal)
+        - is_cooldown: True if 쿨다운 중 (30일 내 동일 신호 있음)
+        - days_since_signal: 마지막 신호 이후 일수 (없으면 None)
     """
     if len(df) < 32 or sma_column not in df.columns:
-        return False
+        return False, None
     
     # 최근 30일 데이터 (오늘 제외)
     recent_30d = df.iloc[-31:-1]  # 30일 전 ~ 어제
+    
+    last_signal_idx = None
     
     for i in range(len(recent_30d) - 1):
         current_close = recent_30d.iloc[i]['Close']
@@ -614,13 +619,23 @@ def check_30day_cooldown(df, sma_column, direction='below'):
         if direction == 'below':
             # 하향돌파: 이전에 위에 있다가 아래로
             if current_close >= current_sma and next_close < next_sma:
-                return True  # 30일 내 동일 신호 있음 → 쿨다운 중
+                last_signal_idx = i + 1  # 더 최근 신호로 업데이트
         else:  # 'above'
             # 상향돌파: 이전에 아래에 있다가 위로
             if current_close < current_sma and next_close >= next_sma:
-                return True  # 30일 내 동일 신호 있음 → 쿨다운 중
+                last_signal_idx = i + 1
     
-    return False  # 30일 내 동일 신호 없음 → 신규 신호 유효
+    if last_signal_idx is not None:
+        # 30일 데이터에서의 인덱스를 일수로 변환
+        days_since = len(recent_30d) - 1 - last_signal_idx
+        return True, days_since
+    
+    return False, None
+
+# 현재 위치 파악 (어떤 이동평균선 아래인지)
+below_50 = pd.notna(qqqm_data['sma_50']) and qqqm_data['price'] < qqqm_data['sma_50']
+below_100 = pd.notna(qqqm_data['sma_100']) and qqqm_data['price'] < qqqm_data['sma_100']
+below_200 = pd.notna(qqqm_data['sma_200']) and qqqm_data['price'] < qqqm_data['sma_200']
 
 # 200일선 상향돌파 체크 (4단계) + 30일 쿨다운
 if len(qqqm_data['df']) >= 2:
@@ -630,36 +645,44 @@ if len(qqqm_data['df']) >= 2:
         was_below_200 = prev_close < prev_sma200
         is_above_200 = qqqm_data['price'] > qqqm_data['sma_200']
         if was_below_200 and is_above_200:
-            # 30일 쿨다운 체크
-            if not check_30day_cooldown(qqqm_data['df'], 'SMA_200', 'above'):
+            is_cooldown, days_since = check_30day_cooldown(qqqm_data['df'], 'SMA_200', 'above')
+            if not is_cooldown:
                 puddle_stage = 4
                 puddle_alert = True
             else:
                 puddle_cooldown_active = True
+                cooldown_info = f"200일선 상향돌파 ({days_since}일 전 발생)"
 
 # 하락 단계 체크 (1~3단계) + 30일 쿨다운
+# 중요: 가장 깊은 단계(200일선)부터 체크
 if puddle_stage == 0:
-    # 3단계: 200일선 하향돌파
-    if pd.notna(qqqm_data['sma_200']) and qqqm_data['price'] < qqqm_data['sma_200']:
-        if not check_30day_cooldown(qqqm_data['df'], 'SMA_200', 'below'):
+    if below_200:
+        # 3단계: 200일선 아래
+        is_cooldown, days_since = check_30day_cooldown(qqqm_data['df'], 'SMA_200', 'below')
+        if not is_cooldown:
             puddle_stage = 3
             puddle_alert = True
         else:
             puddle_cooldown_active = True
-    # 2단계: 100일선 하향돌파
-    elif pd.notna(qqqm_data['sma_100']) and qqqm_data['price'] < qqqm_data['sma_100']:
-        if not check_30day_cooldown(qqqm_data['df'], 'SMA_100', 'below'):
+            cooldown_info = f"200일선 하향돌파 ({days_since}일 전 발생)"
+    elif below_100:
+        # 2단계: 100일선 아래 (but 200일선 위)
+        is_cooldown, days_since = check_30day_cooldown(qqqm_data['df'], 'SMA_100', 'below')
+        if not is_cooldown:
             puddle_stage = 2
             puddle_alert = True
         else:
             puddle_cooldown_active = True
-    # 1단계: 50일선 하향돌파
-    elif pd.notna(qqqm_data['sma_50']) and qqqm_data['price'] < qqqm_data['sma_50']:
-        if not check_30day_cooldown(qqqm_data['df'], 'SMA_50', 'below'):
+            cooldown_info = f"100일선 하향돌파 ({days_since}일 전 발생)"
+    elif below_50:
+        # 1단계: 50일선 아래 (but 100일선 위)
+        is_cooldown, days_since = check_30day_cooldown(qqqm_data['df'], 'SMA_50', 'below')
+        if not is_cooldown:
             puddle_stage = 1
             puddle_alert = True
         else:
             puddle_cooldown_active = True
+            cooldown_info = f"50일선 하향돌파 ({days_since}일 전 발생)"
 
 # Smart Shoulder 발동 조건 체크 (V5.9: 3가지 모두 충족 시)
 # 1. QQQM 비중 > 75%
@@ -782,10 +805,11 @@ if puddle_cooldown_active and not puddle_alert:
         <div class="info-box">
             <div class="warning-title">⏱️ 웅덩이 쿨다운 중 ({current_below} 하향)</div>
             <p><strong>현재가:</strong> ${qqqm_data['price']:.2f} (이동평균선 아래)</p>
-            <p><strong>상태:</strong> 지난 30일 내 동일 신호 발생 이력 있음</p>
+            <p><strong>쿨다운 사유:</strong> {cooldown_info if cooldown_info else "30일 내 동일 신호 발생"}</p>
             <hr style="border-color: rgba(251, 191, 36, 0.3); margin: 10px 0;">
             <p style="color: #fbbf24;"><strong>📋 조치:</strong> 추가 투입 대기 (중복 매수 방지)</p>
             <p style="color: #94a3b8; font-size: 0.9em;">💡 신규 자금은 평시대로 투입 (70/15/5/10)</p>
+            <p style="color: #64748b; font-size: 0.85em;">⏰ 쿨다운 해제: 30일 경과 후 동일 단계 재발동 가능</p>
         </div>
         """, unsafe_allow_html=True)
 

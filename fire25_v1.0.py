@@ -575,7 +575,7 @@ with col_fng:
 st.markdown("---")
 
 # =====================================================================
-# 핵심 로직: 매뉴얼 V5.8
+# 핵심 로직: 매뉴얼 V5.9
 # =====================================================================
 st.header("🎯 작전 상황 분석")
 
@@ -584,12 +584,45 @@ defcon_triggered = False
 if vix_data and vix_data['price'] <= 14.0 and qqqm_data['rsi'] >= 70:
     defcon_triggered = True
 
-# 웅덩이 4단계 체크 (V5.8)
+# 웅덩이 4단계 체크 (V5.9) - 30일 쿨다운 적용
 puddle_stage = 0
 puddle_alert = False
+puddle_cooldown_active = False  # 쿨다운 중인지 여부
 
-# 200일선 상향돌파 체크 (4단계)
-# 이전 종가가 200일선 아래였고, 현재가가 200일선 위인 경우
+# 30일 쿨다운 체크 함수
+def check_30day_cooldown(df, sma_column, direction='below'):
+    """
+    지난 30일 동안 동일한 이동평균선 돌파가 있었는지 확인
+    direction: 'below' = 하향돌파, 'above' = 상향돌파
+    Returns: True if 쿨다운 중 (30일 내 동일 신호 있음), False if 신규 신호
+    """
+    if len(df) < 32 or sma_column not in df.columns:
+        return False
+    
+    # 최근 30일 데이터 (오늘 제외)
+    recent_30d = df.iloc[-31:-1]  # 30일 전 ~ 어제
+    
+    for i in range(len(recent_30d) - 1):
+        current_close = recent_30d.iloc[i]['Close']
+        next_close = recent_30d.iloc[i + 1]['Close']
+        current_sma = recent_30d.iloc[i][sma_column]
+        next_sma = recent_30d.iloc[i + 1][sma_column]
+        
+        if pd.isna(current_sma) or pd.isna(next_sma):
+            continue
+        
+        if direction == 'below':
+            # 하향돌파: 이전에 위에 있다가 아래로
+            if current_close >= current_sma and next_close < next_sma:
+                return True  # 30일 내 동일 신호 있음 → 쿨다운 중
+        else:  # 'above'
+            # 상향돌파: 이전에 아래에 있다가 위로
+            if current_close < current_sma and next_close >= next_sma:
+                return True  # 30일 내 동일 신호 있음 → 쿨다운 중
+    
+    return False  # 30일 내 동일 신호 없음 → 신규 신호 유효
+
+# 200일선 상향돌파 체크 (4단계) + 30일 쿨다운
 if len(qqqm_data['df']) >= 2:
     prev_close = qqqm_data['df'].iloc[-2]['Close']
     prev_sma200 = qqqm_data['df'].iloc[-2]['SMA_200']
@@ -597,22 +630,38 @@ if len(qqqm_data['df']) >= 2:
         was_below_200 = prev_close < prev_sma200
         is_above_200 = qqqm_data['price'] > qqqm_data['sma_200']
         if was_below_200 and is_above_200:
-            puddle_stage = 4
-            puddle_alert = True
+            # 30일 쿨다운 체크
+            if not check_30day_cooldown(qqqm_data['df'], 'SMA_200', 'above'):
+                puddle_stage = 4
+                puddle_alert = True
+            else:
+                puddle_cooldown_active = True
 
-# 하락 단계 체크 (1~3단계)
+# 하락 단계 체크 (1~3단계) + 30일 쿨다운
 if puddle_stage == 0:
+    # 3단계: 200일선 하향돌파
     if pd.notna(qqqm_data['sma_200']) and qqqm_data['price'] < qqqm_data['sma_200']:
-        puddle_stage = 3  # 200일선 하향돌파
-        puddle_alert = True
+        if not check_30day_cooldown(qqqm_data['df'], 'SMA_200', 'below'):
+            puddle_stage = 3
+            puddle_alert = True
+        else:
+            puddle_cooldown_active = True
+    # 2단계: 100일선 하향돌파
     elif pd.notna(qqqm_data['sma_100']) and qqqm_data['price'] < qqqm_data['sma_100']:
-        puddle_stage = 2  # 100일선 하향돌파
-        puddle_alert = True
+        if not check_30day_cooldown(qqqm_data['df'], 'SMA_100', 'below'):
+            puddle_stage = 2
+            puddle_alert = True
+        else:
+            puddle_cooldown_active = True
+    # 1단계: 50일선 하향돌파
     elif pd.notna(qqqm_data['sma_50']) and qqqm_data['price'] < qqqm_data['sma_50']:
-        puddle_stage = 1  # 50일선 하향돌파
-        puddle_alert = True
+        if not check_30day_cooldown(qqqm_data['df'], 'SMA_50', 'below'):
+            puddle_stage = 1
+            puddle_alert = True
+        else:
+            puddle_cooldown_active = True
 
-# Smart Shoulder 발동 조건 체크 (V5.8: 3가지 모두 충족 시)
+# Smart Shoulder 발동 조건 체크 (V5.9: 3가지 모두 충족 시)
 # 1. QQQM 비중 > 75%
 # 2. QQQM 현재가 < 20일 이동평균선 (하향돌파)
 # 3. 최근 전고점 갱신 후 (상승장 이후)
@@ -671,7 +720,7 @@ if puddle_alert:
     
     info = stage_info[puddle_stage]
     
-    # 현금성 자산 = SGOV + 예수금 (V5.8 기준)
+    # 현금성 자산 = SGOV + 예수금 (V5.9 기준)
     cash_base = sgov_value + cash_deposit
     injection_amount = cash_base * (info["rate"] / 100)
     
@@ -692,11 +741,12 @@ if puddle_alert:
     st.markdown(f"""
     <div class="warning-box" style="border-color: {info['color']};">
         <div class="warning-title" style="color: {info['color']};">🚨 웅덩이 매수 구간: {info['name']}</div>
+        <p style="color: #10b981; font-size: 0.9em;">✅ 30일 쿨다운 통과 - 신규 신호!</p>
         <p><strong>현재가:</strong> ${qqqm_data['price']:.2f}</p>
         <p><strong>50일선:</strong> {sma_50_val} | <strong>100일선:</strong> {sma_100_val} | <strong>200일선:</strong> {sma_200_val}</p>
         <p><strong>판단:</strong> {info['desc']}</p>
         <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
-        <p style="font-weight: 700; color: {info['color']}; font-size: 1.1em;">💰 현재 투입 전략 (V5.8)</p>
+        <p style="font-weight: 700; color: {info['color']}; font-size: 1.1em;">💰 현재 투입 전략 (V5.9)</p>
         <div style="background: rgba(251, 191, 36, 0.05); padding: 12px; border-radius: 6px; margin: 10px 0;">
             <p style="margin: 5px 0;">• <strong>현금성 자산:</strong> ${cash_base:,.2f}</p>
             <p style="margin: 5px 0;">  └─ SGOV: ${sgov_value:,.2f} + 예수금: ${cash_deposit:,.2f}</p>
@@ -711,9 +761,33 @@ if puddle_alert:
             <p style="margin: 5px 0;">• <strong>감시 포인트:</strong> {next_info['watch']}</p>
             <p style="margin: 5px 0;">• <strong>다음 투입률:</strong> {next_info['next_rate']}</p>
             <p style="margin: 5px 0; color: #94a3b8;">• <strong>신규 자금:</strong> 발생 시 즉시 투입 (70/15/5/10)</p>
+            <p style="margin: 5px 0; color: #94a3b8;">• <strong>쿨다운:</strong> 30일 후 동일 단계 재발동 가능</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+# 쿨다운 중일 때 (이동평균선 아래이지만 30일 내 이미 신호 발생)
+if puddle_cooldown_active and not puddle_alert:
+    # 현재 어떤 이동평균선 아래인지 확인
+    current_below = ""
+    if pd.notna(qqqm_data['sma_200']) and qqqm_data['price'] < qqqm_data['sma_200']:
+        current_below = "200일선"
+    elif pd.notna(qqqm_data['sma_100']) and qqqm_data['price'] < qqqm_data['sma_100']:
+        current_below = "100일선"
+    elif pd.notna(qqqm_data['sma_50']) and qqqm_data['price'] < qqqm_data['sma_50']:
+        current_below = "50일선"
+    
+    if current_below:
+        st.markdown(f"""
+        <div class="info-box">
+            <div class="warning-title">⏱️ 웅덩이 쿨다운 중 ({current_below} 하향)</div>
+            <p><strong>현재가:</strong> ${qqqm_data['price']:.2f} (이동평균선 아래)</p>
+            <p><strong>상태:</strong> 지난 30일 내 동일 신호 발생 이력 있음</p>
+            <hr style="border-color: rgba(251, 191, 36, 0.3); margin: 10px 0;">
+            <p style="color: #fbbf24;"><strong>📋 조치:</strong> 추가 투입 대기 (중복 매수 방지)</p>
+            <p style="color: #94a3b8; font-size: 0.9em;">💡 신규 자금은 평시대로 투입 (70/15/5/10)</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 if rebalancing_needed:
     excess = qqqm_pct - 70
@@ -1117,10 +1191,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 상황 판단
-is_puddle = puddle_alert  # 웅덩이 발생
+is_puddle = puddle_alert  # 웅덩이 발생 (30일 쿨다운 통과)
+is_cooldown = puddle_cooldown_active and not puddle_alert  # 쿨다운 중
 is_defcon = defcon_triggered  # Defcon 발동
 has_new_cash = new_cash > 0  # 신규 자금
-is_smart_shoulder = smart_shoulder_triggered  # Smart Shoulder 발동 (V5.8: 3가지 조건 모두 충족)
+is_smart_shoulder = smart_shoulder_triggered  # Smart Shoulder 발동 (V5.9: 3가지 조건 모두 충족)
 is_over_75 = condition_1_over_75  # QQQM 비중만 75% 초과 (Smart Shoulder 미발동)
 
 # 매매 계획 생성
@@ -1133,6 +1208,8 @@ if is_puddle:
     stage_colors = {1: "#fbbf24", 2: "#f97316", 3: "#ef4444", 4: "#10b981"}
     stage_names = {1: "1단계(50일선)", 2: "2단계(100일선)", 3: "3단계(200일선↓)", 4: "4단계(200일선↑)"}
     situation_badges.append(f"🚨 <span style='background: {stage_colors[puddle_stage]}; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>웅덩이 {stage_names[puddle_stage]}</span>")
+elif is_cooldown:
+    situation_badges.append("⏱️ <span style='background: #64748b; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>웅덩이 쿨다운 중</span>")
 if is_smart_shoulder:
     situation_badges.append("🚨 <span style='background: #ef4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>Smart Shoulder 발동</span>")
 elif is_over_75:
@@ -1159,7 +1236,7 @@ if is_defcon:
         st.markdown(f"""
         <div class="warning-box">
             <div class="warning-title">🚨 DEFCON + 웅덩이 동시 발생!</div>
-            <p style="font-size: 1.1em; margin: 15px 0;"><strong>📋 특수 상황 대응 (V5.8)</strong></p>
+            <p style="font-size: 1.1em; margin: 15px 0;"><strong>📋 특수 상황 대응 (V5.9)</strong></p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -1257,7 +1334,7 @@ elif is_puddle:
     </div>
     """, unsafe_allow_html=True)
     
-    # 웅덩이 대응 계산 (V5.8)
+    # 웅덩이 대응 계산 (V5.9)
     import math
     
     # 현금성 자산 = SGOV + 예수금
@@ -1333,12 +1410,12 @@ elif is_puddle:
     if puddle_stage < 4:
         st.caption(f"💡 다음 단계 발생 시 이 금액 기준으로 추가 투입")
 
-# 우선순위 3: Smart Shoulder (V5.8: 3가지 조건 모두 충족 시)
+# 우선순위 3: Smart Shoulder (V5.9: 3가지 조건 모두 충족 시)
 elif is_smart_shoulder:
     st.markdown("""
     <div class="warning-box">
         <div class="warning-title">🚨 우선순위 1: Smart Shoulder 발동!</div>
-        <p style="font-size: 1.1em; margin: 15px 0;"><strong>3가지 조건 모두 충족 (V5.8)</strong></p>
+        <p style="font-size: 1.1em; margin: 15px 0;"><strong>3가지 조건 모두 충족 (V5.9)</strong></p>
         <p>✅ QQQM 비중 > 75%</p>
         <p>✅ QQQM < 20일선 (하향돌파)</p>
         <p>✅ 최근 전고점 갱신 후</p>
@@ -2009,7 +2086,7 @@ if vix_data:
 st.markdown("---")
 st.markdown("""
 <p style='text-align: center; color: #94a3b8; font-size: 0.9em;'>
-    📚 TEAM FIRE 25 투자 매뉴얼 V5.8 기반<br>
+    📚 TEAM FIRE 25 투자 매뉴얼 V5.9 기반<br>
     ⚡ 데이터 출처: Yahoo Finance (15-20분 지연)<br>
     ⚠️ 본 대시보드는 투자 참고용이며, 투자 결정은 본인 책임입니다
 </p>

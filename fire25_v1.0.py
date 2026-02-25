@@ -26,6 +26,63 @@ st.set_page_config(
 )
 
 # =====================================================================
+# 로그인 기능
+# =====================================================================
+def check_password():
+    """비밀번호 체크 함수"""
+    
+    # secrets에 password가 설정되어 있지 않으면 로그인 없이 진행
+    if "password" not in st.secrets:
+        return True
+    
+    def password_entered():
+        """비밀번호 입력 시 체크"""
+        if st.session_state["password_input"] == st.secrets["password"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password_input"]  # 비밀번호 메모리에서 삭제
+        else:
+            st.session_state["password_correct"] = False
+    
+    # 이미 로그인 성공한 경우
+    if st.session_state.get("password_correct", False):
+        return True
+    
+    # 로그인 화면 표시
+    st.markdown("""
+    <div style="display: flex; justify-content: center; align-items: center; min-height: 60vh;">
+        <div style="text-align: center;">
+            <h1 style="color: #10b981; margin-bottom: 10px;">🛡️ TEAM FIRE 25</h1>
+            <p style="color: #94a3b8; margin-bottom: 30px;">작전 통제실에 접근하려면 비밀번호를 입력하세요</p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.text_input(
+            "🔐 비밀번호",
+            type="password",
+            on_change=password_entered,
+            key="password_input",
+            placeholder="비밀번호 입력..."
+        )
+        
+        if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+            st.error("❌ 비밀번호가 틀렸습니다")
+        
+        st.markdown("""
+        <p style="text-align: center; color: #64748b; font-size: 0.85em; margin-top: 20px;">
+            💡 비밀번호는 Streamlit Secrets에서 설정할 수 있습니다
+        </p>
+        """, unsafe_allow_html=True)
+    
+    return False
+
+# 로그인 체크
+if not check_password():
+    st.stop()
+
+# =====================================================================
 # 커스텀 CSS (한국 스타일: 상승=빨강, 하락=파랑)
 # =====================================================================
 st.markdown("""

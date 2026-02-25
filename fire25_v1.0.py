@@ -163,25 +163,177 @@ st.markdown(f"<p style='text-align: center; color: #94a3b8;'>마지막 업데이
 st.markdown("---")
 
 # =====================================================================
+# Google Sheets 연동 함수
+# =====================================================================
+def get_google_sheets_client():
+    """Google Sheets 클라이언트 생성"""
+    try:
+        from google.oauth2.service_account import Credentials
+        import gspread
+        
+        # Streamlit Secrets에서 서비스 계정 정보 가져오기
+        if "gcp_service_account" not in st.secrets:
+            return None, "Google Sheets 연동이 설정되지 않았습니다."
+        
+        credentials = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+        )
+        client = gspread.authorize(credentials)
+        return client, None
+    except ImportError:
+        return None, "gspread 패키지가 설치되지 않았습니다."
+    except Exception as e:
+        return None, f"Google Sheets 연결 실패: {str(e)}"
+
+def load_portfolio_from_sheets():
+    """Google Sheets에서 최신 포트폴리오 데이터 불러오기"""
+    client, error = get_google_sheets_client()
+    if error:
+        return None, error
+    
+    try:
+        sheet_url = st.secrets.get("spreadsheet_url", "")
+        if not sheet_url:
+            return None, "스프레드시트 URL이 설정되지 않았습니다."
+        
+        spreadsheet = client.open_by_url(sheet_url)
+        worksheet = spreadsheet.worksheet("Portfolio")
+        
+        # 마지막 행 데이터 가져오기
+        all_data = worksheet.get_all_values()
+        if len(all_data) <= 1:  # 헤더만 있는 경우
+            return None, "저장된 데이터가 없습니다."
+        
+        # 마지막 행
+        last_row = all_data[-1]
+        # 헤더: Date, QQQM, SCHD, IAU, SGOV, Cash, NewCash, TotalValue
+        
+        return {
+            'date': last_row[0],
+            'qqqm_qty': float(last_row[1]) if last_row[1] else 0,
+            'schd_qty': float(last_row[2]) if last_row[2] else 0,
+            'iau_qty': float(last_row[3]) if last_row[3] else 0,
+            'sgov_qty': float(last_row[4]) if last_row[4] else 0,
+            'cash_deposit': float(last_row[5]) if last_row[5] else 0,
+            'new_cash': float(last_row[6]) if last_row[6] else 0,
+            'total_value': float(last_row[7]) if last_row[7] else 0
+        }, None
+    except gspread.WorksheetNotFound:
+        return None, "Portfolio 시트를 찾을 수 없습니다."
+    except Exception as e:
+        return None, f"데이터 불러오기 실패: {str(e)}"
+
+def save_portfolio_to_sheets(qqqm, schd, iau, sgov, cash, new_cash, total_value):
+    """Google Sheets에 포트폴리오 데이터 저장"""
+    client, error = get_google_sheets_client()
+    if error:
+        return False, error
+    
+    try:
+        sheet_url = st.secrets.get("spreadsheet_url", "")
+        if not sheet_url:
+            return False, "스프레드시트 URL이 설정되지 않았습니다."
+        
+        spreadsheet = client.open_by_url(sheet_url)
+        
+        # Portfolio 시트 가져오기 (없으면 생성)
+        try:
+            worksheet = spreadsheet.worksheet("Portfolio")
+        except gspread.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(title="Portfolio", rows=1000, cols=10)
+            # 헤더 추가
+            worksheet.append_row(["Date", "QQQM", "SCHD", "IAU", "SGOV", "Cash", "NewCash", "TotalValue"])
+        
+        # 현재 날짜/시간
+        from datetime import datetime
+        import pytz
+        kst = pytz.timezone('Asia/Seoul')
+        now = datetime.now(kst).strftime("%Y-%m-%d %H:%M")
+        
+        # 데이터 추가
+        worksheet.append_row([now, qqqm, schd, iau, sgov, cash, new_cash, round(total_value, 2)])
+        
+        return True, "저장 완료!"
+    except Exception as e:
+        return False, f"저장 실패: {str(e)}"
+
+def get_portfolio_history():
+    """Google Sheets에서 포트폴리오 히스토리 가져오기"""
+    client, error = get_google_sheets_client()
+    if error:
+        return None, error
+    
+    try:
+        sheet_url = st.secrets.get("spreadsheet_url", "")
+        spreadsheet = client.open_by_url(sheet_url)
+        worksheet = spreadsheet.worksheet("Portfolio")
+        
+        all_data = worksheet.get_all_values()
+        if len(all_data) <= 1:
+            return None, "히스토리 데이터가 없습니다."
+        
+        # DataFrame으로 변환
+        headers = all_data[0]
+        data = all_data[1:]
+        
+        history_df = pd.DataFrame(data, columns=headers)
+        history_df['TotalValue'] = pd.to_numeric(history_df['TotalValue'], errors='coerce')
+        history_df['Date'] = pd.to_datetime(history_df['Date'], format='%Y-%m-%d %H:%M', errors='coerce')
+        
+        return history_df, None
+    except Exception as e:
+        return None, f"히스토리 불러오기 실패: {str(e)}"
+
+# Google Sheets 연동 상태 확인
+gs_available = "gcp_service_account" in st.secrets if hasattr(st, 'secrets') else False
+
+# 저장된 데이터 불러오기 시도
+saved_data = None
+if gs_available:
+    saved_data, load_error = load_portfolio_from_sheets()
+    if load_error and "저장된 데이터가 없습니다" not in load_error:
+        st.sidebar.warning(f"⚠️ {load_error}")
+
+# =====================================================================
 # 사이드바: 포트폴리오 입력
 # =====================================================================
 with st.sidebar:
     st.header("📊 포트폴리오 설정")
     
+    # Google Sheets 연동 상태 표시
+    if gs_available:
+        if saved_data:
+            st.success(f"☁️ 마지막 저장: {saved_data['date']}")
+        else:
+            st.info("☁️ Google Sheets 연동됨")
+    
     st.subheader("보유 주식")
-    qqqm_qty = st.number_input("QQQM 수량", min_value=0.0, value=100.0, step=1.0, format="%.2f")
-    schd_qty = st.number_input("SCHD 수량", min_value=0.0, value=50.0, step=1.0, format="%.2f")
-    iau_qty = st.number_input("IAU 수량", min_value=0.0, value=20.0, step=1.0, format="%.2f")
-    sgov_qty = st.number_input("SGOV 수량", min_value=0.0, value=30.0, step=1.0, format="%.2f",
+    
+    # 저장된 값이 있으면 기본값으로 사용
+    default_qqqm = saved_data['qqqm_qty'] if saved_data else 100.0
+    default_schd = saved_data['schd_qty'] if saved_data else 50.0
+    default_iau = saved_data['iau_qty'] if saved_data else 20.0
+    default_sgov = saved_data['sgov_qty'] if saved_data else 30.0
+    default_cash = saved_data['cash_deposit'] if saved_data else 2000.0
+    default_new = 0.0  # 신규 자금은 항상 0으로 시작
+    
+    qqqm_qty = st.number_input("QQQM 수량", min_value=0.0, value=default_qqqm, step=1.0, format="%.2f")
+    schd_qty = st.number_input("SCHD 수량", min_value=0.0, value=default_schd, step=1.0, format="%.2f")
+    iau_qty = st.number_input("IAU 수량", min_value=0.0, value=default_iau, step=1.0, format="%.2f")
+    sgov_qty = st.number_input("SGOV 수량", min_value=0.0, value=default_sgov, step=1.0, format="%.2f",
                                 help="단기국채 ETF (SGOV) 보유 수량")
     
     st.subheader("💵 예수금")
-    cash_deposit = st.number_input("예수금 (USD)", min_value=0.0, value=2000.0, step=100.0, format="%.2f",
+    cash_deposit = st.number_input("예수금 (USD)", min_value=0.0, value=default_cash, step=100.0, format="%.2f",
                                     help="증권계좌 현금 (바로 투자 가능한 자금)")
     
     st.markdown("---")
     st.subheader("💰 신규 자금")
-    new_cash = st.number_input("월급/추가 입금 (USD)", min_value=0.0, value=0.0, step=100.0, format="%.2f",
+    new_cash = st.number_input("월급/추가 입금 (USD)", min_value=0.0, value=default_new, step=100.0, format="%.2f",
                                 help="이번 달 투입할 신규 자금 (월급, 보너스 등)")
     
     st.markdown("---")
@@ -197,15 +349,15 @@ with st.sidebar:
         <div style="font-size: 0.9em; line-height: 1.8;">
             <div style="display: flex; justify-content: space-between; margin: 5px 0;">
                 <span style="color: #94a3b8;">QQQM</span>
-                <span style="color: #10b981; font-weight: 700;">70%</span>
+                <span style="color: #10b981; font-weight: 700;">72%</span>
             </div>
             <div style="display: flex; justify-content: space-between; margin: 5px 0;">
                 <span style="color: #94a3b8;">SCHD</span>
-                <span style="color: #3b82f6; font-weight: 700;">15%</span>
+                <span style="color: #3b82f6; font-weight: 700;">16%</span>
             </div>
             <div style="display: flex; justify-content: space-between; margin: 5px 0;">
                 <span style="color: #94a3b8;">IAU</span>
-                <span style="color: #fbbf24; font-weight: 700;">5%</span>
+                <span style="color: #fbbf24; font-weight: 700;">2%</span>
             </div>
             <div style="display: flex; justify-content: space-between; margin: 5px 0;">
                 <span style="color: #94a3b8;">현금</span>
@@ -215,13 +367,24 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     
-    refresh_button = st.button("🔄 데이터 새로고침", use_container_width=True)
+    # 버튼들
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        refresh_button = st.button("🔄 새로고침", use_container_width=True)
+    with col_btn2:
+        save_button = st.button("💾 저장", use_container_width=True, disabled=not gs_available)
     
     # 새로고침 버튼 클릭 시 캐시 삭제
     if refresh_button:
         st.cache_data.clear()
         st.success("✅ 캐시가 삭제되었습니다. 최신 데이터를 가져옵니다...")
         st.rerun()
+    
+    # 저장 버튼은 total_value 계산 후 처리 (아래에서 처리)
+    if 'save_clicked' not in st.session_state:
+        st.session_state.save_clicked = False
+    if save_button:
+        st.session_state.save_clicked = True
 
 # =====================================================================
 # 데이터 가져오기 함수
@@ -396,6 +559,20 @@ cash_pct = (total_cash / total_value) * 100 if total_value > 0 else 0
 # SGOV와 예수금 개별 비중
 sgov_pct = (sgov_value / total_value) * 100 if total_value > 0 else 0
 deposit_pct = (cash_deposit / total_value) * 100 if total_value > 0 else 0
+
+# =====================================================================
+# Google Sheets 저장 처리
+# =====================================================================
+if st.session_state.get('save_clicked', False) and gs_available:
+    success, message = save_portfolio_to_sheets(
+        qqqm_qty, schd_qty, iau_qty, sgov_qty, 
+        cash_deposit, new_cash, total_value
+    )
+    if success:
+        st.sidebar.success(f"✅ {message}")
+    else:
+        st.sidebar.error(f"❌ {message}")
+    st.session_state.save_clicked = False
 
 # =====================================================================
 # 사이드바: 현금 현황 표시 (데이터 로딩 후)
@@ -575,7 +752,7 @@ with col_fng:
 st.markdown("---")
 
 # =====================================================================
-# 핵심 로직: 매뉴얼 V5.9
+# 핵심 로직: 매뉴얼 V5.10
 # =====================================================================
 st.header("🎯 작전 상황 분석")
 
@@ -584,7 +761,7 @@ defcon_triggered = False
 if vix_data and vix_data['price'] <= 14.0 and qqqm_data['rsi'] >= 70:
     defcon_triggered = True
 
-# 웅덩이 4단계 체크 (V5.9) - 30일 쿨다운 적용
+# 웅덩이 4단계 체크 (V5.10) - 30일 쿨다운 적용
 puddle_stage = 0
 puddle_alert = False
 puddle_cooldown_active = False  # 쿨다운 중인지 여부
@@ -684,13 +861,13 @@ if puddle_stage == 0:
             puddle_cooldown_active = True
             cooldown_info = f"50일선 하향돌파 ({days_since}일 전 발생)"
 
-# Smart Shoulder 발동 조건 체크 (V5.9: 3가지 모두 충족 시)
-# 1. QQQM 비중 > 75%
+# Smart Shoulder 발동 조건 체크 (V5.10: 3가지 모두 충족 시)
+# 1. QQQM 비중 > 77%
 # 2. QQQM 현재가 < 20일 이동평균선 (하향돌파)
 # 3. 최근 전고점 갱신 후 (상승장 이후)
 
-# 조건 1: QQQM 비중 > 75%
-condition_1_over_75 = qqqm_pct > 75
+# 조건 1: QQQM 비중 > 77%
+condition_1_over_77 = qqqm_pct > 77
 
 # 조건 2: QQQM 현재가 < 20일선
 condition_2_below_sma20 = False
@@ -709,10 +886,10 @@ if len(qqqm_data['df']) >= 252:  # 1년 데이터 필요
         condition_3_after_high = True
 
 # Smart Shoulder 발동 여부 (3가지 모두 충족)
-smart_shoulder_triggered = condition_1_over_75 and condition_2_below_sma20 and condition_3_after_high
+smart_shoulder_triggered = condition_1_over_77 and condition_2_below_sma20 and condition_3_after_high
 
 # 단순 리밸런싱 필요 여부 (비중만 초과, Smart Shoulder 조건 미충족)
-rebalancing_needed = condition_1_over_75 and not smart_shoulder_triggered
+rebalancing_needed = condition_1_over_77 and not smart_shoulder_triggered
 
 # 경고 표시
 if defcon_triggered:
@@ -726,7 +903,7 @@ if defcon_triggered:
         <p style="font-weight: 700; color: #8b5cf6; font-size: 1.1em;">🔮 이미 SGOV 투입했다면? 다음 액션</p>
         <div style="background: rgba(139, 92, 246, 0.1); padding: 12px; border-radius: 6px; margin: 10px 0;">
             <p style="margin: 5px 0;">• <strong>감시:</strong> VIX > 14 또는 RSI < 70 되면 DEFCON 해제</p>
-            <p style="margin: 5px 0;">• <strong>해제 후:</strong> 정상 투자 재개 (목표 비중 70/15/5/10)</p>
+            <p style="margin: 5px 0;">• <strong>해제 후:</strong> 정상 투자 재개 (목표 비중 72/16/2/10)</p>
             <p style="margin: 5px 0;">• <strong>기존 포지션:</strong> 유지 (매도 금지)</p>
         </div>
     </div>
@@ -743,7 +920,7 @@ if puddle_alert:
     
     info = stage_info[puddle_stage]
     
-    # 현금성 자산 = SGOV + 예수금 (V5.9 기준)
+    # 현금성 자산 = SGOV + 예수금 (V5.10 기준)
     cash_base = sgov_value + cash_deposit
     injection_amount = cash_base * (info["rate"] / 100)
     
@@ -769,21 +946,21 @@ if puddle_alert:
         <p><strong>50일선:</strong> {sma_50_val} | <strong>100일선:</strong> {sma_100_val} | <strong>200일선:</strong> {sma_200_val}</p>
         <p><strong>판단:</strong> {info['desc']}</p>
         <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
-        <p style="font-weight: 700; color: {info['color']}; font-size: 1.1em;">💰 현재 투입 전략 (V5.9)</p>
+        <p style="font-weight: 700; color: {info['color']}; font-size: 1.1em;">💰 현재 투입 전략 (V5.10)</p>
         <div style="background: rgba(251, 191, 36, 0.05); padding: 12px; border-radius: 6px; margin: 10px 0;">
             <p style="margin: 5px 0;">• <strong>현금성 자산:</strong> ${cash_base:,.2f}</p>
             <p style="margin: 5px 0;">  └─ SGOV: ${sgov_value:,.2f} + 예수금: ${cash_deposit:,.2f}</p>
             <p style="margin: 5px 0;">• <strong>투입 비율:</strong> {info['rate']}%</p>
             <p style="margin: 5px 0; font-size: 1.2em; color: {info['color']};">• <strong>투입 금액:</strong> ${injection_amount:,.2f}</p>
         </div>
-        <p style="color: #10b981; font-weight: 700; margin-top: 10px;">💡 + 신규 자금도 함께 투입 (목표 비중 70/15/5/10)</p>
+        <p style="color: #10b981; font-weight: 700; margin-top: 10px;">💡 + 신규 자금도 함께 투입 (목표 비중 72/16/2/10)</p>
         <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
         <p style="font-weight: 700; color: #8b5cf6; font-size: 1.1em;">🔮 이미 투입했다면? 다음 액션</p>
         <div style="background: rgba(139, 92, 246, 0.1); padding: 12px; border-radius: 6px; margin: 10px 0;">
             <p style="margin: 5px 0;">• <strong>다음 단계:</strong> {next_info['next']}</p>
             <p style="margin: 5px 0;">• <strong>감시 포인트:</strong> {next_info['watch']}</p>
             <p style="margin: 5px 0;">• <strong>다음 투입률:</strong> {next_info['next_rate']}</p>
-            <p style="margin: 5px 0; color: #94a3b8;">• <strong>신규 자금:</strong> 발생 시 즉시 투입 (70/15/5/10)</p>
+            <p style="margin: 5px 0; color: #94a3b8;">• <strong>신규 자금:</strong> 발생 시 즉시 투입 (72/16/2/10)</p>
             <p style="margin: 5px 0; color: #94a3b8;">• <strong>쿨다운:</strong> 30일 후 동일 단계 재발동 가능</p>
         </div>
     </div>
@@ -808,13 +985,13 @@ if puddle_cooldown_active and not puddle_alert:
             <p><strong>쿨다운 사유:</strong> {cooldown_info if cooldown_info else "30일 내 동일 신호 발생"}</p>
             <hr style="border-color: rgba(251, 191, 36, 0.3); margin: 10px 0;">
             <p style="color: #fbbf24;"><strong>📋 조치:</strong> 추가 투입 대기 (중복 매수 방지)</p>
-            <p style="color: #94a3b8; font-size: 0.9em;">💡 신규 자금은 평시대로 투입 (70/15/5/10)</p>
+            <p style="color: #94a3b8; font-size: 0.9em;">💡 신규 자금은 평시대로 투입 (72/16/2/10)</p>
             <p style="color: #64748b; font-size: 0.85em;">⏰ 쿨다운 해제: 30일 경과 후 동일 단계 재발동 가능</p>
         </div>
         """, unsafe_allow_html=True)
 
 if rebalancing_needed:
-    excess = qqqm_pct - 70
+    excess = qqqm_pct - 72
     
     # 다음 액션 조건 설명 생성
     missing_conditions = []
@@ -827,8 +1004,8 @@ if rebalancing_needed:
     
     st.markdown(f"""
     <div class="info-box">
-        <div class="warning-title">⚠️ QQQM 비중 초과 (75% 이상)</div>
-        <p><strong>QQQM 현재 비중:</strong> {qqqm_pct:.2f}% (목표: 70%)</p>
+        <div class="warning-title">⚠️ QQQM 비중 초과 (77% 이상)</div>
+        <p><strong>QQQM 현재 비중:</strong> {qqqm_pct:.2f}% (목표: 72%)</p>
         <p><strong>초과:</strong> +{excess:.2f}%p</p>
         <p><strong>20일선 상태:</strong> {'❌ 하향돌파' if condition_2_below_sma20 else '✅ 20일선 위'}</p>
         <p><strong>전고점 상태:</strong> {'⚠️ 최근 신고가 갱신' if condition_3_after_high else '✅ 신고가 미갱신'}</p>
@@ -838,29 +1015,29 @@ if rebalancing_needed:
         <p style="font-weight: 700; color: #8b5cf6; font-size: 1em;">🔮 다음 액션</p>
         <div style="background: rgba(139, 92, 246, 0.1); padding: 10px; border-radius: 6px; margin: 8px 0;">
             <p style="margin: 3px 0; font-size: 0.95em;">• <strong>Smart Shoulder 발동 조건:</strong> {next_action_text} 시</p>
-            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>신규 자금:</strong> 평시대로 투입 (70/15/5/10)</p>
+            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>신규 자금:</strong> 평시대로 투입 (72/16/2/10)</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
 if smart_shoulder_triggered:
-    excess = qqqm_pct - 70
+    excess = qqqm_pct - 72
     st.markdown(f"""
     <div class="warning-box">
         <div class="warning-title">🚨 Smart Shoulder 발동!</div>
-        <p><strong>QQQM 현재 비중:</strong> {qqqm_pct:.2f}% (목표: 70%)</p>
+        <p><strong>QQQM 현재 비중:</strong> {qqqm_pct:.2f}% (목표: 72%)</p>
         <p><strong>초과:</strong> +{excess:.2f}%p</p>
-        <p>✅ 조건 1: QQQM > 75% 충족</p>
+        <p>✅ 조건 1: QQQM > 77% 충족</p>
         <p>✅ 조건 2: 20일선 하향돌파 (${qqqm_data['sma_20']:.2f})</p>
         <p>✅ 조건 3: 최근 전고점 갱신 후</p>
         <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 10px 0;">
-        <p style="color: #ef4444;"><strong>📋 조치:</strong> 전체 자산을 70/15/5/10으로 리밸런싱</p>
+        <p style="color: #ef4444;"><strong>📋 조치:</strong> 전체 자산을 72/16/2/10으로 리밸런싱</p>
         <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 10px 0;">
         <p style="font-weight: 700; color: #8b5cf6; font-size: 1em;">🔮 리밸런싱 완료 후 다음 액션</p>
         <div style="background: rgba(139, 92, 246, 0.1); padding: 10px; border-radius: 6px; margin: 8px 0;">
             <p style="margin: 3px 0; font-size: 0.95em;">• <strong>완료 후:</strong> 정상 운영 복귀</p>
-            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>신규 자금:</strong> 목표 비중대로 투입 (70/15/5/10)</p>
-            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>감시:</strong> QQQM 75% 다시 초과 시 재발동</p>
+            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>신규 자금:</strong> 목표 비중대로 투입 (72/16/2/10)</p>
+            <p style="margin: 3px 0; font-size: 0.95em;">• <strong>감시:</strong> QQQM 77% 다시 초과 시 재발동</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1028,8 +1205,8 @@ with col1:
         '종목': ['QQQM', 'SCHD', 'IAU', 'SGOV', '예수금', '총 현금'],
         '평가액': [qqqm_value, schd_value, iau_value, sgov_value, cash_deposit, total_cash],
         '현재 비중 (%)': [qqqm_pct, schd_pct, iau_pct, sgov_pct, deposit_pct, cash_pct],
-        '목표 비중 (%)': [70, 15, 5, '-', '-', 10],
-        '차이 (%p)': [qqqm_pct - 70, schd_pct - 15, iau_pct - 5, '-', '-', cash_pct - 10]
+        '목표 비중 (%)': [72, 16, 2, '-', '-', 10],
+        '차이 (%p)': [qqqm_pct - 72, schd_pct - 16, iau_pct - 2, '-', '-', cash_pct - 10]
     })
     
     # 스타일 적용을 위한 함수
@@ -1219,8 +1396,8 @@ is_puddle = puddle_alert  # 웅덩이 발생 (30일 쿨다운 통과)
 is_cooldown = puddle_cooldown_active and not puddle_alert  # 쿨다운 중
 is_defcon = defcon_triggered  # Defcon 발동
 has_new_cash = new_cash > 0  # 신규 자금
-is_smart_shoulder = smart_shoulder_triggered  # Smart Shoulder 발동 (V5.9: 3가지 조건 모두 충족)
-is_over_75 = condition_1_over_75  # QQQM 비중만 75% 초과 (Smart Shoulder 미발동)
+is_smart_shoulder = smart_shoulder_triggered  # Smart Shoulder 발동 (V5.10: 3가지 조건 모두 충족)
+is_over_77 = condition_1_over_77  # QQQM 비중만 77% 초과 (Smart Shoulder 미발동)
 
 # 매매 계획 생성
 st.subheader("🎯 현재 상황 진단")
@@ -1236,8 +1413,8 @@ elif is_cooldown:
     situation_badges.append("⏱️ <span style='background: #64748b; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>웅덩이 쿨다운 중</span>")
 if is_smart_shoulder:
     situation_badges.append("🚨 <span style='background: #ef4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>Smart Shoulder 발동</span>")
-elif is_over_75:
-    situation_badges.append("⚠️ <span style='background: #fbbf24; color: #1e293b; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>QQQM 75%↑ (대기)</span>")
+elif is_over_77:
+    situation_badges.append("⚠️ <span style='background: #fbbf24; color: #1e293b; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>QQQM 77%↑ (대기)</span>")
 if has_new_cash:
     situation_badges.append("💰 <span style='background: #3b82f6; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>신규 자금 ${:,.0f}</span>".format(new_cash))
 
@@ -1260,7 +1437,7 @@ if is_defcon:
         st.markdown(f"""
         <div class="warning-box">
             <div class="warning-title">🚨 DEFCON + 웅덩이 동시 발생!</div>
-            <p style="font-size: 1.1em; margin: 15px 0;"><strong>📋 특수 상황 대응 (V5.9)</strong></p>
+            <p style="font-size: 1.1em; margin: 15px 0;"><strong>📋 특수 상황 대응 (V5.10)</strong></p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -1294,7 +1471,7 @@ if is_defcon:
             <div style="background: rgba(239, 68, 68, 0.1); border-left: 4px solid #ef4444; padding: 15px; margin: 10px 0; border-radius: 8px;">
                 <p style="font-weight: 700; color: #ef4444;">웅덩이 3단계 이후 (200일선):</p>
                 <ul style="margin: 10px 0;">
-                    <li><strong>신규 자금:</strong> 목표 비중대로 투입 (70/15/5/10)</li>
+                    <li><strong>신규 자금:</strong> 목표 비중대로 투입 (72/16/2/10)</li>
                     <li><strong>기존 현금:</strong> 웅덩이 매수에 사용</li>
                 </ul>
             </div>
@@ -1302,9 +1479,9 @@ if is_defcon:
             
             if has_new_cash:
                 import math
-                qqqm_shares = math.floor(new_cash * 0.70 / qqqm_data['price'])
-                schd_shares = math.floor(new_cash * 0.15 / schd_data['price'])
-                iau_shares = math.floor(new_cash * 0.05 / iau_data['price'])
+                qqqm_shares = math.floor(new_cash * 0.72 / qqqm_data['price'])
+                schd_shares = math.floor(new_cash * 0.16 / schd_data['price'])
+                iau_shares = math.floor(new_cash * 0.02 / iau_data['price'])
                 sgov_amount = new_cash * 0.10
                 
                 st.success(f"💰 신규 자금 배분 (${new_cash:,.2f})")
@@ -1358,7 +1535,7 @@ elif is_puddle:
     </div>
     """, unsafe_allow_html=True)
     
-    # 웅덩이 대응 계산 (V5.9)
+    # 웅덩이 대응 계산 (V5.10)
     import math
     
     # 현금성 자산 = SGOV + 예수금
@@ -1382,10 +1559,10 @@ elif is_puddle:
     # 총 투입 금액 (신규 자금 포함)
     total_injection = use_deposit + sgov_sell_amount + new_cash
     
-    # 매수 계획 (목표 비중 70/15/5/10)
-    qqqm_shares = math.floor(total_injection * 0.70 / qqqm_data['price'])
-    schd_shares = math.floor(total_injection * 0.15 / schd_data['price'])
-    iau_shares = math.floor(total_injection * 0.05 / iau_data['price'])
+    # 매수 계획 (목표 비중 72/16/2/10)
+    qqqm_shares = math.floor(total_injection * 0.72 / qqqm_data['price'])
+    schd_shares = math.floor(total_injection * 0.16 / schd_data['price'])
+    iau_shares = math.floor(total_injection * 0.02 / iau_data['price'])
     sgov_buy_amount = total_injection * 0.10
     
     # 실제 매수 금액
@@ -1416,10 +1593,10 @@ elif is_puddle:
     st.write(f"**총 투입 가능: :green[${total_injection:,.2f}]**")
     
     st.markdown("")
-    st.info("📊 매수 전략 (목표 비중 70/15/5/10)")
-    st.write(f"• **QQQM (70%): {qqqm_shares}주** = ${qqqm_buy_amount:,.2f}")
-    st.write(f"• **SCHD (15%): {schd_shares}주** = ${schd_buy_amount:,.2f}")
-    st.write(f"• **IAU (5%): {iau_shares}주** = ${iau_buy_amount:,.2f}")
+    st.info("📊 매수 전략 (목표 비중 72/16/2/10)")
+    st.write(f"• **QQQM (72%): {qqqm_shares}주** = ${qqqm_buy_amount:,.2f}")
+    st.write(f"• **SCHD (16%): {schd_shares}주** = ${schd_buy_amount:,.2f}")
+    st.write(f"• **IAU (2%): {iau_shares}주** = ${iau_buy_amount:,.2f}")
     st.write(f"• **SGOV (10%): ${sgov_buy_amount:,.2f}**")
     
     # 실제 사용 금액 합계
@@ -1434,17 +1611,17 @@ elif is_puddle:
     if puddle_stage < 4:
         st.caption(f"💡 다음 단계 발생 시 이 금액 기준으로 추가 투입")
 
-# 우선순위 3: Smart Shoulder (V5.9: 3가지 조건 모두 충족 시)
+# 우선순위 3: Smart Shoulder (V5.10: 3가지 조건 모두 충족 시)
 elif is_smart_shoulder:
     st.markdown("""
     <div class="warning-box">
         <div class="warning-title">🚨 우선순위 1: Smart Shoulder 발동!</div>
-        <p style="font-size: 1.1em; margin: 15px 0;"><strong>3가지 조건 모두 충족 (V5.9)</strong></p>
-        <p>✅ QQQM 비중 > 75%</p>
+        <p style="font-size: 1.1em; margin: 15px 0;"><strong>3가지 조건 모두 충족 (V5.10)</strong></p>
+        <p>✅ QQQM 비중 > 77%</p>
         <p>✅ QQQM < 20일선 (하향돌파)</p>
         <p>✅ 최근 전고점 갱신 후</p>
         <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 10px 0;">
-        <p style="color: #ef4444;"><strong>📋 조치:</strong> 전체 자산을 목표 비중(70/15/5/10)으로 리밸런싱</p>
+        <p style="color: #ef4444;"><strong>📋 조치:</strong> 전체 자산을 목표 비중(72/16/2/10)으로 리밸런싱</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1453,9 +1630,9 @@ elif is_smart_shoulder:
     # 목표 금액 계산 (신규 자금 포함)
     total_with_new = total_value + new_cash
     
-    target_qqqm_value = total_with_new * 0.70
-    target_schd_value = total_with_new * 0.15
-    target_iau_value = total_with_new * 0.05
+    target_qqqm_value = total_with_new * 0.72
+    target_schd_value = total_with_new * 0.16
+    target_iau_value = total_with_new * 0.02
     target_cash_value = total_with_new * 0.10
     
     # 현재 vs 목표 차이
@@ -1484,14 +1661,14 @@ elif is_smart_shoulder:
     st.markdown("---")
     
     # 목표 상태
-    st.write("**목표 포트폴리오 (70/15/5/10):**")
+    st.write("**목표 포트폴리오 (72/16/2/10):**")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("QQQM", f"${target_qqqm_value:,.0f}", "70%")
+        st.metric("QQQM", f"${target_qqqm_value:,.0f}", "72%")
     with col2:
-        st.metric("SCHD", f"${target_schd_value:,.0f}", "15%")
+        st.metric("SCHD", f"${target_schd_value:,.0f}", "16%")
     with col3:
-        st.metric("IAU", f"${target_iau_value:,.0f}", "5%")
+        st.metric("IAU", f"${target_iau_value:,.0f}", "2%")
     with col4:
         st.metric("현금", f"${target_cash_value:,.0f}", "10%")
     
@@ -1558,13 +1735,13 @@ elif is_smart_shoulder:
     st.markdown("---")
     st.caption("💡 매도는 올림, 매수는 내림 적용 | 잔액은 예수금 보관")
 
-# QQQM 75% 초과하지만 Smart Shoulder 미발동 (상승장)
-elif is_over_75:
+# QQQM 77% 초과하지만 Smart Shoulder 미발동 (상승장)
+elif is_over_77:
     st.markdown("""
     <div class="info-box">
         <div class="warning-title">⚠️ QQQM 비중 초과 (상승장 대기)</div>
         <p style="font-size: 1.1em; margin: 15px 0;"><strong>Smart Shoulder 조건 미충족</strong></p>
-        <p style="color: #10b981;">상승장에서는 75% 넘어도 OK! 하락 전환 시에만 조정</p>
+        <p style="color: #10b981;">상승장에서는 77% 넘어도 OK! 하락 전환 시에만 조정</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1578,19 +1755,19 @@ elif is_over_75:
         st.write("Smart Shoulder 미발동 → 목표 비중대로 배분")
         
         import math
-        # 평시 비율 70/15/5/10
-        new_qqqm_shares = math.floor(new_cash * 0.70 / qqqm_data['price'])
-        new_schd_shares = math.floor(new_cash * 0.15 / schd_data['price'])
-        new_iau_shares = math.floor(new_cash * 0.05 / iau_data['price'])
+        # 평시 비율 72/16/2/10
+        new_qqqm_shares = math.floor(new_cash * 0.72 / qqqm_data['price'])
+        new_schd_shares = math.floor(new_cash * 0.16 / schd_data['price'])
+        new_iau_shares = math.floor(new_cash * 0.02 / iau_data['price'])
         new_sgov_value = new_cash * 0.10
         
         new_qqqm_value = new_qqqm_shares * qqqm_data['price']
         new_schd_value = new_schd_shares * schd_data['price']
         new_iau_value = new_iau_shares * iau_data['price']
         
-        st.write(f"• **QQQM (70%): {new_qqqm_shares}주** = ${new_qqqm_value:,.2f}")
-        st.write(f"• **SCHD (15%): {new_schd_shares}주** = ${new_schd_value:,.2f}")
-        st.write(f"• **IAU (5%): {new_iau_shares}주** = ${new_iau_value:,.2f}")
+        st.write(f"• **QQQM (72%): {new_qqqm_shares}주** = ${new_qqqm_value:,.2f}")
+        st.write(f"• **SCHD (16%): {new_schd_shares}주** = ${new_schd_value:,.2f}")
+        st.write(f"• **IAU (2%): {new_iau_shares}주** = ${new_iau_value:,.2f}")
         st.write(f"• **SGOV (10%): ${new_sgov_value:,.2f}**")
         
         new_total_use = new_qqqm_value + new_schd_value + new_iau_value + new_sgov_value
@@ -1609,9 +1786,9 @@ elif has_new_cash:
     import math
     
     # 매수는 내림
-    normal_qqqm_shares = math.floor(new_cash * 0.70 / qqqm_data['price'])
-    normal_schd_shares = math.floor(new_cash * 0.15 / schd_data['price'])
-    normal_iau_shares = math.floor(new_cash * 0.05 / iau_data['price'])
+    normal_qqqm_shares = math.floor(new_cash * 0.72 / qqqm_data['price'])
+    normal_schd_shares = math.floor(new_cash * 0.16 / schd_data['price'])
+    normal_iau_shares = math.floor(new_cash * 0.02 / iau_data['price'])
     normal_sgov_value = new_cash * 0.10
     
     # 실제 금액
@@ -1889,9 +2066,9 @@ with st.spinner('📡 시장 동향 분석 중...'):
 # 포트폴리오 요약 (상단에 배치)
 # =====================================================================
 portfolio_change = (
-    (qqqm_data['change_pct'] * 0.70) + 
-    (schd_data['change_pct'] * 0.15) + 
-    (iau_data['change_pct'] * 0.05)
+    (qqqm_data['change_pct'] * 0.72) + 
+    (schd_data['change_pct'] * 0.16) + 
+    (iau_data['change_pct'] * 0.02)
 )
 portfolio_daily_change = total_value * (portfolio_change / 100)
 
@@ -1980,9 +2157,9 @@ with col3:
 st.markdown(f"""
 <div style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px 15px; margin-top: 15px;">
     <p style="color: #e2e8f0; font-size: 0.95em; margin: 0; text-align: center;">
-        <span style="color: #10b981; font-weight: 600;">QQQM</span> {qqqm_data['change_pct']:+.2f}% × 70% &nbsp;&nbsp;|&nbsp;&nbsp; 
-        <span style="color: #3b82f6; font-weight: 600;">SCHD</span> {schd_data['change_pct']:+.2f}% × 15% &nbsp;&nbsp;|&nbsp;&nbsp; 
-        <span style="color: #fbbf24; font-weight: 600;">IAU</span> {iau_data['change_pct']:+.2f}% × 5%
+        <span style="color: #10b981; font-weight: 600;">QQQM</span> {qqqm_data['change_pct']:+.2f}% × 72% &nbsp;&nbsp;|&nbsp;&nbsp; 
+        <span style="color: #3b82f6; font-weight: 600;">SCHD</span> {schd_data['change_pct']:+.2f}% × 16% &nbsp;&nbsp;|&nbsp;&nbsp; 
+        <span style="color: #fbbf24; font-weight: 600;">IAU</span> {iau_data['change_pct']:+.2f}% × 2%
     </p>
 </div>
 """, unsafe_allow_html=True)
@@ -2108,9 +2285,52 @@ if vix_data:
                 st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;✅ 변동성 감소 중 - 시장 안정화 신호")
 
 st.markdown("---")
+
+# =====================================================================
+# 포트폴리오 히스토리 (Google Sheets 연동 시)
+# =====================================================================
+if gs_available:
+    with st.expander("📈 포트폴리오 히스토리", expanded=False):
+        history_df, history_error = get_portfolio_history()
+        
+        if history_error:
+            st.info(f"ℹ️ {history_error}")
+        elif history_df is not None and len(history_df) > 0:
+            # 자산 추이 차트
+            st.subheader("💰 총 자산 추이")
+            
+            # 차트 데이터 준비
+            chart_df = history_df[['Date', 'TotalValue']].dropna()
+            if len(chart_df) > 1:
+                st.line_chart(chart_df.set_index('Date')['TotalValue'])
+            
+            # 최근 기록 테이블
+            st.subheader("📋 최근 기록")
+            display_df = history_df.tail(10).sort_values('Date', ascending=False)
+            display_df['TotalValue'] = display_df['TotalValue'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "-")
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            # 통계
+            if len(history_df) > 1:
+                total_values = history_df['TotalValue'].dropna()
+                if len(total_values) > 1:
+                    first_value = total_values.iloc[0]
+                    last_value = total_values.iloc[-1]
+                    change = last_value - first_value
+                    change_pct = (change / first_value) * 100 if first_value > 0 else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("첫 기록", f"${first_value:,.0f}")
+                    with col2:
+                        st.metric("현재", f"${last_value:,.0f}")
+                    with col3:
+                        st.metric("변화", f"${change:,.0f}", f"{change_pct:+.1f}%")
+
+st.markdown("---")
 st.markdown("""
 <p style='text-align: center; color: #94a3b8; font-size: 0.9em;'>
-    📚 TEAM FIRE 25 투자 매뉴얼 V5.9 기반<br>
+    📚 TEAM FIRE 25 투자 매뉴얼 V5.10 기반<br>
     ⚡ 데이터 출처: Yahoo Finance (15-20분 지연)<br>
     ⚠️ 본 대시보드는 투자 참고용이며, 투자 결정은 본인 책임입니다
 </p>

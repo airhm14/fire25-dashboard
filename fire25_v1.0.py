@@ -5,6 +5,15 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
 import time
 import requests
+import math
+
+# Google Sheets 관련 import
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GSPREAD_AVAILABLE = True
+except ImportError:
+    GSPREAD_AVAILABLE = False
 
 # =====================================================================
 # 페이지 설정
@@ -222,10 +231,11 @@ def load_portfolio_from_sheets():
             'new_cash': float(last_row[6]) if last_row[6] else 0,
             'total_value': float(last_row[7]) if last_row[7] else 0
         }, None
-    except gspread.WorksheetNotFound:
-        return None, "Portfolio 시트를 찾을 수 없습니다."
     except Exception as e:
-        return None, f"데이터 불러오기 실패: {str(e)}"
+        error_msg = str(e)
+        if "WorksheetNotFound" in error_msg or "worksheet" in error_msg.lower():
+            return None, "Portfolio 시트가 없습니다. 저장 버튼을 눌러 생성하세요."
+        return None, f"데이터 불러오기 실패: {error_msg}"
 
 def save_portfolio_to_sheets(qqqm, schd, iau, sgov, cash, new_cash, total_value):
     """Google Sheets에 포트폴리오 데이터 저장"""
@@ -243,13 +253,12 @@ def save_portfolio_to_sheets(qqqm, schd, iau, sgov, cash, new_cash, total_value)
         # Portfolio 시트 가져오기 (없으면 생성)
         try:
             worksheet = spreadsheet.worksheet("Portfolio")
-        except gspread.WorksheetNotFound:
+        except Exception:
             worksheet = spreadsheet.add_worksheet(title="Portfolio", rows=1000, cols=10)
             # 헤더 추가
             worksheet.append_row(["Date", "QQQM", "SCHD", "IAU", "SGOV", "Cash", "NewCash", "TotalValue"])
         
         # 현재 날짜/시간
-        from datetime import datetime
         import pytz
         kst = pytz.timezone('Asia/Seoul')
         now = datetime.now(kst).strftime("%Y-%m-%d %H:%M")

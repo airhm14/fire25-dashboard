@@ -1302,9 +1302,10 @@ with col2:
         values=[qqqm_value, schd_value, iau_value, sgov_value, cash_deposit],
         hole=0.4,
         marker=dict(colors=['#10b981', '#3b82f6', '#fbbf24', '#94a3b8', '#64748b']),
-        textinfo='label+percent',
-        textfont=dict(size=12, color='white'),
+        textinfo='percent',
+        textfont=dict(size=11, color='white'),
         textposition='inside',
+        insidetextorientation='horizontal',
         hovertemplate='<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>'
     )])
     
@@ -1312,20 +1313,21 @@ with col2:
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#e2e8f0'),
-        height=350,
-        margin=dict(l=20, r=20, t=20, b=20),
+        height=320,
+        margin=dict(l=10, r=10, t=10, b=60),
         showlegend=True,
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.05,
+            y=-0.1,
             xanchor="center",
             x=0.5,
-            font=dict(size=11)
-        )
+            font=dict(size=10)
+        ),
+        uniformtext=dict(minsize=10, mode='hide')
     )
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
 st.markdown("---")
 

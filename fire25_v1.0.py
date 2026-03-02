@@ -1296,35 +1296,35 @@ with col1:
 with col2:
     st.subheader("비중 시각화")
     
-    # 파이 차트 (모바일 최적화)
+    # 파이 차트 (모바일 최적화 - 범례 완전 분리)
     fig = go.Figure(data=[go.Pie(
         labels=['QQQM', 'SCHD', 'IAU', 'SGOV', '예수금'],
         values=[qqqm_value, schd_value, iau_value, sgov_value, cash_deposit],
         hole=0.4,
         marker=dict(colors=['#10b981', '#3b82f6', '#fbbf24', '#94a3b8', '#64748b']),
-        textinfo='percent',
-        textfont=dict(size=11, color='white'),
+        textinfo='label+percent',
+        textfont=dict(size=10, color='white'),
         textposition='inside',
         insidetextorientation='horizontal',
-        hovertemplate='<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>'
+        hovertemplate='<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>',
+        domain=dict(x=[0.1, 0.9], y=[0.15, 0.95])  # 차트 영역 조정
     )])
     
     fig.update_layout(
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#e2e8f0'),
-        height=320,
-        margin=dict(l=10, r=10, t=10, b=60),
+        height=380,
+        margin=dict(l=0, r=0, t=10, b=10),
         showlegend=True,
         legend=dict(
             orientation="h",
-            yanchor="top",
-            y=-0.1,
+            yanchor="bottom",
+            y=0,
             xanchor="center",
             x=0.5,
             font=dict(size=10)
-        ),
-        uniformtext=dict(minsize=10, mode='hide')
+        )
     )
     
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})

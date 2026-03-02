@@ -1296,14 +1296,15 @@ with col1:
 with col2:
     st.subheader("비중 시각화")
     
-    # 파이 차트
+    # 파이 차트 (모바일 최적화)
     fig = go.Figure(data=[go.Pie(
         labels=['QQQM', 'SCHD', 'IAU', 'SGOV', '예수금'],
         values=[qqqm_value, schd_value, iau_value, sgov_value, cash_deposit],
         hole=0.4,
         marker=dict(colors=['#10b981', '#3b82f6', '#fbbf24', '#94a3b8', '#64748b']),
         textinfo='label+percent',
-        textfont=dict(size=14, color='white'),
+        textfont=dict(size=12, color='white'),
+        textposition='inside',
         hovertemplate='<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>'
     )])
     
@@ -1311,14 +1312,16 @@ with col2:
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#e2e8f0'),
-        height=400,
+        height=350,
+        margin=dict(l=20, r=20, t=20, b=20),
         showlegend=True,
         legend=dict(
-            orientation="v",
-            yanchor="middle",
-            y=0.5,
-            xanchor="left",
-            x=1.1
+            orientation="h",
+            yanchor="top",
+            y=-0.05,
+            xanchor="center",
+            x=0.5,
+            font=dict(size=11)
         )
     )
     

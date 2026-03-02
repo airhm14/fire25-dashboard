@@ -1303,11 +1303,11 @@ with col2:
         hole=0.4,
         marker=dict(colors=['#10b981', '#3b82f6', '#fbbf24', '#94a3b8', '#64748b']),
         textinfo='label+percent',
-        textfont=dict(size=10, color='white'),
+        textfont=dict(size=11, color='white'),
         textposition='inside',
         insidetextorientation='horizontal',
         hovertemplate='<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>',
-        domain=dict(x=[0.1, 0.9], y=[0.15, 0.95])  # 차트 영역 조정
+        domain=dict(x=[0.1, 0.9], y=[0.15, 0.95])
     )])
     
     fig.update_layout(
@@ -1324,7 +1324,8 @@ with col2:
             xanchor="center",
             x=0.5,
             font=dict(size=10)
-        )
+        ),
+        uniformtext=dict(minsize=11, mode='show')  # 모든 텍스트 동일 크기
     )
     
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})

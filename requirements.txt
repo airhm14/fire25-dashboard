@@ -5,3 +5,4 @@ gspread
 google-auth
 pytz
 requests
+plotly

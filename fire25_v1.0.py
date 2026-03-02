@@ -2366,32 +2366,190 @@ if gs_available:
             st.subheader("💰 총 자산 추이")
             
             # 차트 데이터 준비
-            chart_df = history_df[['Date', 'TotalValue']].dropna()
-            if len(chart_df) > 1:
-                st.line_chart(chart_df.set_index('Date')['TotalValue'])
+            chart_df = history_df[['Date', 'TotalValue']].dropna().copy()
+            chart_df = chart_df.sort_values('Date')
+            
+            if len(chart_df) > 0:
+                # 기간 선택 옵션
+                st.markdown("**📅 기간 선택**")
+                period_options = ["전체", "최근 1주", "최근 1개월", "최근 3개월", "최근 6개월", "최근 1년", "직접 선택"]
+                selected_period = st.selectbox("조회 기간", period_options, index=0, label_visibility="collapsed")
+                
+                # 기간에 따른 필터링
+                today = pd.Timestamp.now()
+                if selected_period == "최근 1주":
+                    start_date = today - pd.Timedelta(days=7)
+                    filtered_df = chart_df[chart_df['Date'] >= start_date]
+                elif selected_period == "최근 1개월":
+                    start_date = today - pd.Timedelta(days=30)
+                    filtered_df = chart_df[chart_df['Date'] >= start_date]
+                elif selected_period == "최근 3개월":
+                    start_date = today - pd.Timedelta(days=90)
+                    filtered_df = chart_df[chart_df['Date'] >= start_date]
+                elif selected_period == "최근 6개월":
+                    start_date = today - pd.Timedelta(days=180)
+                    filtered_df = chart_df[chart_df['Date'] >= start_date]
+                elif selected_period == "최근 1년":
+                    start_date = today - pd.Timedelta(days=365)
+                    filtered_df = chart_df[chart_df['Date'] >= start_date]
+                elif selected_period == "직접 선택":
+                    col_date1, col_date2 = st.columns(2)
+                    with col_date1:
+                        min_date = chart_df['Date'].min().date() if len(chart_df) > 0 else today.date()
+                        start_date = st.date_input("시작일", value=min_date, min_value=min_date)
+                    with col_date2:
+                        max_date = chart_df['Date'].max().date() if len(chart_df) > 0 else today.date()
+                        end_date = st.date_input("종료일", value=max_date, max_value=max_date)
+                    filtered_df = chart_df[(chart_df['Date'].dt.date >= start_date) & (chart_df['Date'].dt.date <= end_date)]
+                else:  # 전체
+                    filtered_df = chart_df
+                
+                if len(filtered_df) > 0:
+                    # Y축 범위 계산 (데이터에 맞게 자동 조정 + 여유 공간)
+                    min_val = filtered_df['TotalValue'].min()
+                    max_val = filtered_df['TotalValue'].max()
+                    value_range = max_val - min_val
+                    
+                    # 여유 공간 5% 추가
+                    if value_range > 0:
+                        y_min = min_val - (value_range * 0.05)
+                        y_max = max_val + (value_range * 0.05)
+                    else:
+                        # 값이 모두 같은 경우
+                        y_min = min_val * 0.95
+                        y_max = max_val * 1.05
+                    
+                    # Plotly 인터랙티브 차트
+                    fig = go.Figure()
+                    
+                    # 라인 차트 추가
+                    fig.add_trace(go.Scatter(
+                        x=filtered_df['Date'],
+                        y=filtered_df['TotalValue'],
+                        mode='lines+markers',
+                        name='총 자산',
+                        line=dict(color='#10b981', width=2),
+                        marker=dict(size=6, color='#10b981'),
+                        hovertemplate='<b>%{x|%Y-%m-%d %H:%M}</b><br>총 자산: $%{y:,.2f}<extra></extra>'
+                    ))
+                    
+                    # 최고점/최저점 표시
+                    max_idx = filtered_df['TotalValue'].idxmax()
+                    min_idx = filtered_df['TotalValue'].idxmin()
+                    
+                    fig.add_trace(go.Scatter(
+                        x=[filtered_df.loc[max_idx, 'Date']],
+                        y=[filtered_df.loc[max_idx, 'TotalValue']],
+                        mode='markers+text',
+                        name='최고점',
+                        marker=dict(size=12, color='#ef4444', symbol='triangle-up'),
+                        text=[f"${filtered_df.loc[max_idx, 'TotalValue']:,.0f}"],
+                        textposition='top center',
+                        textfont=dict(color='#ef4444', size=11),
+                        hovertemplate='<b>최고점</b><br>%{x|%Y-%m-%d}<br>$%{y:,.2f}<extra></extra>'
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=[filtered_df.loc[min_idx, 'Date']],
+                        y=[filtered_df.loc[min_idx, 'TotalValue']],
+                        mode='markers+text',
+                        name='최저점',
+                        marker=dict(size=12, color='#3b82f6', symbol='triangle-down'),
+                        text=[f"${filtered_df.loc[min_idx, 'TotalValue']:,.0f}"],
+                        textposition='bottom center',
+                        textfont=dict(color='#3b82f6', size=11),
+                        hovertemplate='<b>최저점</b><br>%{x|%Y-%m-%d}<br>$%{y:,.2f}<extra></extra>'
+                    ))
+                    
+                    # 레이아웃 설정
+                    fig.update_layout(
+                        title=dict(
+                            text=f"📊 포트폴리오 가치 추이 ({selected_period})",
+                            font=dict(size=16, color='#f1f5f9')
+                        ),
+                        xaxis=dict(
+                            title="날짜",
+                            gridcolor='rgba(148, 163, 184, 0.2)',
+                            tickformat='%m/%d',
+                            rangeslider=dict(visible=True, thickness=0.05),  # 하단 범위 슬라이더
+                        ),
+                        yaxis=dict(
+                            title="자산 가치 (USD)",
+                            gridcolor='rgba(148, 163, 184, 0.2)',
+                            tickformat='$,.0f',
+                            range=[y_min, y_max],  # 자동 범위 설정
+                        ),
+                        plot_bgcolor='rgba(15, 23, 42, 0.8)',
+                        paper_bgcolor='rgba(15, 23, 42, 0)',
+                        font=dict(color='#94a3b8'),
+                        hovermode='x unified',
+                        showlegend=True,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1,
+                            font=dict(size=11)
+                        ),
+                        margin=dict(l=10, r=10, t=50, b=10),
+                        height=450
+                    )
+                    
+                    # 줌/팬 버튼 설정
+                    fig.update_layout(
+                        modebar=dict(
+                            bgcolor='rgba(15, 23, 42, 0.8)',
+                            color='#94a3b8',
+                            activecolor='#10b981'
+                        )
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True, config={
+                        'displayModeBar': True,
+                        'modeBarButtonsToAdd': ['drawline', 'eraseshape'],
+                        'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+                        'displaylogo': False,
+                        'toImageButtonOptions': {
+                            'format': 'png',
+                            'filename': 'fire25_portfolio_history',
+                            'height': 600,
+                            'width': 1200,
+                            'scale': 2
+                        }
+                    })
+                    
+                    # 기간 통계
+                    st.markdown("---")
+                    st.markdown("**📊 선택 기간 통계**")
+                    
+                    period_first = filtered_df['TotalValue'].iloc[0]
+                    period_last = filtered_df['TotalValue'].iloc[-1]
+                    period_change = period_last - period_first
+                    period_change_pct = (period_change / period_first) * 100 if period_first > 0 else 0
+                    period_max = filtered_df['TotalValue'].max()
+                    period_min = filtered_df['TotalValue'].min()
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("시작", f"${period_first:,.0f}")
+                    with col2:
+                        st.metric("현재", f"${period_last:,.0f}", f"{period_change_pct:+.1f}%")
+                    with col3:
+                        st.metric("최고", f"${period_max:,.0f}", f"+${period_max - period_first:,.0f}")
+                    with col4:
+                        st.metric("최저", f"${period_min:,.0f}", f"${period_min - period_first:,.0f}")
+                    
+                else:
+                    st.warning("선택한 기간에 데이터가 없습니다.")
             
             # 최근 기록 테이블
+            st.markdown("---")
             st.subheader("📋 최근 기록")
-            display_df = history_df.tail(10).sort_values('Date', ascending=False)
+            display_df = history_df.tail(10).sort_values('Date', ascending=False).copy()
             display_df['TotalValue'] = display_df['TotalValue'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "-")
+            display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d %H:%M')
             st.dataframe(display_df, use_container_width=True, hide_index=True)
-            
-            # 통계
-            if len(history_df) > 1:
-                total_values = history_df['TotalValue'].dropna()
-                if len(total_values) > 1:
-                    first_value = total_values.iloc[0]
-                    last_value = total_values.iloc[-1]
-                    change = last_value - first_value
-                    change_pct = (change / first_value) * 100 if first_value > 0 else 0
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("첫 기록", f"${first_value:,.0f}")
-                    with col2:
-                        st.metric("현재", f"${last_value:,.0f}")
-                    with col3:
-                        st.metric("변화", f"${change:,.0f}", f"{change_pct:+.1f}%")
 
 st.markdown("---")
 st.markdown("""

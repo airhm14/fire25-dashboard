@@ -6,6 +6,16 @@ from datetime import datetime, timedelta, timezone
 import time
 import requests
 import math
+from fire25.signals import calculate_puddle_signal
+from fire25.backtest import run_backtest
+
+
+def fmt_money(x):
+    return f"${x:,.2f}" if x is not None else "N/A"
+
+
+def fmt_num(x, d=2):
+    return f"{x:,.{d}f}" if x is not None else "N/A"
 
 # Google Sheets 관련 import
 try:
@@ -401,6 +411,8 @@ with st.sidebar:
     st.subheader("💰 신규 자금")
     new_cash = st.number_input("월급/추가 입금 (USD)", min_value=0.0, value=default_new, step=100.0, format="%.2f",
                                 help="이번 달 투입할 신규 자금 (월급, 보너스 등)")
+    backtest_enabled = st.toggle("Backtest (experimental)", value=False)
+    backtest_vol_adjust = st.toggle("Vol-adjusted sizing", value=False, disabled=not backtest_enabled)
     
     st.markdown("---")
     st.markdown(f"""
@@ -650,7 +662,7 @@ with st.sidebar:
     # SGOV 정보 표시
     col1, col2 = st.columns([1, 1])
     with col1:
-        st.metric("SGOV", f"{sgov_qty:.0f}주")
+        st.metric("SGOV", f"{sgov_qty:,.2f}주")
     with col2:
         st.metric("현재가", f"${sgov_price:.2f}")
     
@@ -704,10 +716,10 @@ with col4:
             value=f"${sgov_price:.2f}",
             delta=f"{sgov_data['change_pct']:+.2f}%"
         )
-        st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>보유: {sgov_qty:.0f}주</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>보유: {sgov_qty:,.2f}주</p>", unsafe_allow_html=True)
     else:
         st.metric(label="SGOV (현금성)", value=f"${sgov_price:.2f}")
-        st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>보유: {sgov_qty:.0f}주</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>보유: {sgov_qty:,.2f}주</p>", unsafe_allow_html=True)
 
 # 시장 심리 지표 (VIX + Fear & Greed)
 st.markdown("<br>", unsafe_allow_html=True)
@@ -828,104 +840,11 @@ if vix_data and vix_data['price'] <= 14.0 and qqqm_data['rsi'] >= 70:
     defcon_triggered = True
 
 # 웅덩이 4단계 체크 (V5.10) - 30일 쿨다운 적용
-puddle_stage = 0
-puddle_alert = False
-puddle_cooldown_active = False  # 쿨다운 중인지 여부
-cooldown_info = ""  # 쿨다운 상세 정보
-
-# 30일 쿨다운 체크 함수
-def check_30day_cooldown(df, sma_column, direction='below'):
-    """
-    지난 30일 동안 동일한 이동평균선 돌파가 있었는지 확인
-    direction: 'below' = 하향돌파, 'above' = 상향돌파
-    Returns: (is_cooldown, days_since_signal)
-        - is_cooldown: True if 쿨다운 중 (30일 내 동일 신호 있음)
-        - days_since_signal: 마지막 신호 이후 일수 (없으면 None)
-    """
-    if len(df) < 32 or sma_column not in df.columns:
-        return False, None
-    
-    # 최근 30일 데이터 (오늘 제외)
-    recent_30d = df.iloc[-31:-1]  # 30일 전 ~ 어제
-    
-    last_signal_idx = None
-    
-    for i in range(len(recent_30d) - 1):
-        current_close = recent_30d.iloc[i]['Close']
-        next_close = recent_30d.iloc[i + 1]['Close']
-        current_sma = recent_30d.iloc[i][sma_column]
-        next_sma = recent_30d.iloc[i + 1][sma_column]
-        
-        if pd.isna(current_sma) or pd.isna(next_sma):
-            continue
-        
-        if direction == 'below':
-            # 하향돌파: 이전에 위에 있다가 아래로
-            if current_close >= current_sma and next_close < next_sma:
-                last_signal_idx = i + 1  # 더 최근 신호로 업데이트
-        else:  # 'above'
-            # 상향돌파: 이전에 아래에 있다가 위로
-            if current_close < current_sma and next_close >= next_sma:
-                last_signal_idx = i + 1
-    
-    if last_signal_idx is not None:
-        # 30일 데이터에서의 인덱스를 일수로 변환
-        days_since = len(recent_30d) - 1 - last_signal_idx
-        return True, days_since
-    
-    return False, None
-
-# 현재 위치 파악 (어떤 이동평균선 아래인지)
-below_50 = pd.notna(qqqm_data['sma_50']) and qqqm_data['price'] < qqqm_data['sma_50']
-below_100 = pd.notna(qqqm_data['sma_100']) and qqqm_data['price'] < qqqm_data['sma_100']
-below_200 = pd.notna(qqqm_data['sma_200']) and qqqm_data['price'] < qqqm_data['sma_200']
-
-# 200일선 상향돌파 체크 (4단계) + 30일 쿨다운
-if len(qqqm_data['df']) >= 2:
-    prev_close = qqqm_data['df'].iloc[-2]['Close']
-    prev_sma200 = qqqm_data['df'].iloc[-2]['SMA_200']
-    if pd.notna(prev_sma200) and pd.notna(qqqm_data['sma_200']):
-        was_below_200 = prev_close < prev_sma200
-        is_above_200 = qqqm_data['price'] > qqqm_data['sma_200']
-        if was_below_200 and is_above_200:
-            is_cooldown, days_since = check_30day_cooldown(qqqm_data['df'], 'SMA_200', 'above')
-            if not is_cooldown:
-                puddle_stage = 4
-                puddle_alert = True
-            else:
-                puddle_cooldown_active = True
-                cooldown_info = f"200일선 상향돌파 ({days_since}일 전 발생)"
-
-# 하락 단계 체크 (1~3단계) + 30일 쿨다운
-# 중요: 가장 깊은 단계(200일선)부터 체크
-if puddle_stage == 0:
-    if below_200:
-        # 3단계: 200일선 아래
-        is_cooldown, days_since = check_30day_cooldown(qqqm_data['df'], 'SMA_200', 'below')
-        if not is_cooldown:
-            puddle_stage = 3
-            puddle_alert = True
-        else:
-            puddle_cooldown_active = True
-            cooldown_info = f"200일선 하향돌파 ({days_since}일 전 발생)"
-    elif below_100:
-        # 2단계: 100일선 아래 (but 200일선 위)
-        is_cooldown, days_since = check_30day_cooldown(qqqm_data['df'], 'SMA_100', 'below')
-        if not is_cooldown:
-            puddle_stage = 2
-            puddle_alert = True
-        else:
-            puddle_cooldown_active = True
-            cooldown_info = f"100일선 하향돌파 ({days_since}일 전 발생)"
-    elif below_50:
-        # 1단계: 50일선 아래 (but 100일선 위)
-        is_cooldown, days_since = check_30day_cooldown(qqqm_data['df'], 'SMA_50', 'below')
-        if not is_cooldown:
-            puddle_stage = 1
-            puddle_alert = True
-        else:
-            puddle_cooldown_active = True
-            cooldown_info = f"50일선 하향돌파 ({days_since}일 전 발생)"
+puddle_result = calculate_puddle_signal(qqqm_data['df'], cooldown_days=30)
+puddle_stage = puddle_result.stage
+puddle_alert = puddle_result.alert
+puddle_cooldown_active = puddle_result.cooldown_active
+cooldown_info = puddle_result.cooldown_info or ""
 
 # Smart Shoulder 발동 조건 체크 (V5.10: 3가지 모두 충족 시)
 # 1. QQQM 비중 > 77%
@@ -1449,6 +1368,95 @@ fig_rsi.update_layout(
 
 st.plotly_chart(fig_rsi, use_container_width=True)
 
+if backtest_enabled:
+    bt_stage_alloc = {0: 0.0, 1: 0.15, 2: 0.35, 3: 0.50, 4: 1.0}
+    bt_fee_bps = 1.0
+    bt_slippage_bps = 2.0
+    bt_result = run_backtest(
+        qqqm_data['df'][['Open', 'Close', 'SMA_50', 'SMA_100', 'SMA_200']].copy(),
+        initial_cash=10000.0,
+        stage_alloc=bt_stage_alloc,
+        fee_bps=bt_fee_bps,
+        slippage_bps=bt_slippage_bps,
+        use_vol_adjustment=backtest_vol_adjust,
+    )
+
+    st.markdown("---")
+    st.header("🧪 백테스트 (실험)")
+    st.caption("룰: D일 종가 신호 계산 → D+1일 시가 체결, 수수료 1bp + 슬리피지 2bp")
+    st.markdown(f"""
+    <div class="info-box">
+        <div class="warning-title">Assumptions</div>
+        <p>• Signal timing: evaluated at day D close</p>
+        <p>• Execution timing: filled at day D+1 open (next trading day)</p>
+        <p>• stage 4: deploy all remaining cash at next-day open</p>
+        <p>• fee_bps: {bt_fee_bps:.1f} | slippage_bps: {bt_slippage_bps:.1f}</p>
+        <p>• stage_alloc: {bt_stage_alloc}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    bt_col1, bt_col2, bt_col3, bt_col4 = st.columns(4)
+    with bt_col1:
+        st.metric("CAGR", f"{bt_result.metrics.get('CAGR', 0.0) * 100:.2f}%")
+    with bt_col2:
+        st.metric("MDD", f"{bt_result.metrics.get('MDD', 0.0) * 100:.2f}%")
+    with bt_col3:
+        st.metric("Vol", f"{bt_result.metrics.get('Vol', 0.0) * 100:.2f}%")
+    with bt_col4:
+        st.metric("Sharpe", f"{bt_result.metrics.get('Sharpe', 0.0):.2f}")
+
+    if not bt_result.equity_curve.empty:
+        fig_bt = go.Figure()
+        fig_bt.add_trace(go.Scatter(
+            x=bt_result.equity_curve.index,
+            y=bt_result.equity_curve.values,
+            mode='lines',
+            name='Equity Curve',
+            line=dict(color='#10b981', width=2),
+        ))
+        fig_bt.update_layout(
+            plot_bgcolor='rgba(30, 41, 59, 0.5)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#e2e8f0'),
+            xaxis=dict(gridcolor='rgba(148, 163, 184, 0.2)', showgrid=True),
+            yaxis=dict(gridcolor='rgba(148, 163, 184, 0.2)', showgrid=True, title='Equity (USD)'),
+            height=320,
+            hovermode='x unified',
+            margin=dict(l=40, r=20, t=20, b=20),
+        )
+        st.plotly_chart(fig_bt, use_container_width=True, config={'displayModeBar': False})
+
+        if not bt_result.trades.empty:
+            st.caption(f"거래 수: {len(bt_result.trades)}")
+            trades_view = bt_result.trades.sort_values("exec_date", ascending=False).head(15).copy()
+            trades_view["signal_date"] = pd.to_datetime(trades_view["signal_date"]).dt.strftime("%Y-%m-%d")
+            trades_view["exec_date"] = pd.to_datetime(trades_view["exec_date"]).dt.strftime("%Y-%m-%d")
+            trades_view["action"] = trades_view["action"].map(lambda x: "매수" if x == "BUY" else str(x))
+            trades_view["price"] = trades_view["price"].map(fmt_money)
+            trades_view["buy_amount"] = trades_view["buy_amount"].map(fmt_money)
+            trades_view["shares_bought"] = trades_view["shares_bought"].map(lambda x: fmt_num(x, 2))
+            trades_view["cash_after"] = trades_view["cash_after"].map(fmt_money)
+            trades_view = trades_view.rename(
+                columns={
+                    "signal_date": "신호일",
+                    "exec_date": "체결일",
+                    "stage": "단계",
+                    "action": "동작",
+                    "price": "체결가",
+                    "buy_amount": "매수금액",
+                    "shares_bought": "매수수량",
+                    "cash_after": "잔여현금",
+                }
+            )
+            trades_view = trades_view[
+                ["신호일", "체결일", "단계", "동작", "매수금액", "매수수량", "체결가", "잔여현금"]
+            ]
+            st.dataframe(
+                trades_view,
+                use_container_width=True,
+                hide_index=True,
+            )
+
 st.markdown("---")
 
 # =====================================================================
@@ -1488,7 +1496,7 @@ if is_smart_shoulder:
 elif is_over_77:
     situation_badges.append("⚠️ <span style='background: #fbbf24; color: #1e293b; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>QQQM 77%↑ (대기)</span>")
 if has_new_cash:
-    situation_badges.append("💰 <span style='background: #3b82f6; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>신규 자금 ${:,.0f}</span>".format(new_cash))
+    situation_badges.append("💰 <span style='background: #3b82f6; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700; display: inline-block; margin: 4px 0;'>신규 자금 ${:,.2f}</span>".format(new_cash))
 
 if situation_badges:
     # 각 배지를 줄바꿈으로 분리하여 세로로 표시 (모바일 대응)
@@ -1557,9 +1565,9 @@ if is_defcon:
                 sgov_amount = new_cash * 0.10
                 
                 st.success(f"💰 신규 자금 배분 (${new_cash:,.2f})")
-                st.write(f"• QQQM: {qqqm_shares}주")
-                st.write(f"• SCHD: {schd_shares}주")
-                st.write(f"• IAU: {iau_shares}주")
+                st.write(f"• QQQM: {qqqm_shares:,.2f}주")
+                st.write(f"• SCHD: {schd_shares:,.2f}주")
+                st.write(f"• IAU: {iau_shares:,.2f}주")
                 st.write(f"• SGOV: ${sgov_amount:,.2f}")
     else:
         # 순수 DEFCON (웅덩이 없음)
@@ -1654,7 +1662,7 @@ elif is_puddle:
     st.write(f"**{info['rate']}% 투입 = ${injection_amount:,.2f}**")
     if sgov_shares_to_sell > 0:
         st.write(f"• 예수금 사용: ${use_deposit:,.2f}")
-        st.write(f"• **SGOV 매도: {sgov_shares_to_sell}주** = ${sgov_sell_amount:,.2f}")
+        st.write(f"• **SGOV 매도: {sgov_shares_to_sell:,.2f}주** = ${sgov_sell_amount:,.2f}")
     else:
         st.write(f"• 예수금에서 사용: ${use_deposit:,.2f}")
     
@@ -1666,9 +1674,9 @@ elif is_puddle:
     
     st.markdown("")
     st.info("📊 매수 전략 (목표 비중 72/16/2/10)")
-    st.write(f"• **QQQM (72%): {qqqm_shares}주** = ${qqqm_buy_amount:,.2f}")
-    st.write(f"• **SCHD (16%): {schd_shares}주** = ${schd_buy_amount:,.2f}")
-    st.write(f"• **IAU (2%): {iau_shares}주** = ${iau_buy_amount:,.2f}")
+    st.write(f"• **QQQM (72%): {qqqm_shares:,.2f}주** = ${qqqm_buy_amount:,.2f}")
+    st.write(f"• **SCHD (16%): {schd_shares:,.2f}주** = ${schd_buy_amount:,.2f}")
+    st.write(f"• **IAU (2%): {iau_shares:,.2f}주** = ${iau_buy_amount:,.2f}")
     st.write(f"• **SGOV (10%): ${sgov_buy_amount:,.2f}**")
     
     # 실제 사용 금액 합계
@@ -1719,13 +1727,13 @@ elif is_smart_shoulder:
     st.write("**현재 포트폴리오:**")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("QQQM", f"${qqqm_value:,.0f}", f"{qqqm_pct:.1f}%")
+        st.metric("QQQM", f"${qqqm_value:,.2f}", f"{qqqm_pct:.2f}%")
     with col2:
-        st.metric("SCHD", f"${schd_value:,.0f}", f"{schd_pct:.1f}%")
+        st.metric("SCHD", f"${schd_value:,.2f}", f"{schd_pct:.2f}%")
     with col3:
-        st.metric("IAU", f"${iau_value:,.0f}", f"{iau_pct:.1f}%")
+        st.metric("IAU", f"${iau_value:,.2f}", f"{iau_pct:.2f}%")
     with col4:
-        st.metric("현금", f"${total_cash:,.0f}", f"{cash_pct:.1f}%")
+        st.metric("현금", f"${total_cash:,.2f}", f"{cash_pct:.2f}%")
     
     if has_new_cash:
         st.info(f"💰 신규 자금 포함: ${new_cash:,.2f} → 총 자산: ${total_with_new:,.2f}")
@@ -1736,13 +1744,13 @@ elif is_smart_shoulder:
     st.write("**목표 포트폴리오 (72/16/2/10):**")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("QQQM", f"${target_qqqm_value:,.0f}", "72%")
+        st.metric("QQQM", f"${target_qqqm_value:,.2f}", "72%")
     with col2:
-        st.metric("SCHD", f"${target_schd_value:,.0f}", "16%")
+        st.metric("SCHD", f"${target_schd_value:,.2f}", "16%")
     with col3:
-        st.metric("IAU", f"${target_iau_value:,.0f}", "2%")
+        st.metric("IAU", f"${target_iau_value:,.2f}", "2%")
     with col4:
-        st.metric("현금", f"${target_cash_value:,.0f}", "10%")
+        st.metric("현금", f"${target_cash_value:,.2f}", "10%")
     
     st.markdown("---")
     
@@ -1753,12 +1761,12 @@ elif is_smart_shoulder:
     if diff_qqqm < 0:
         qqqm_sell_shares = math.ceil(abs(diff_qqqm) / qqqm_data['price'])
         qqqm_sell_value = qqqm_sell_shares * qqqm_data['price']
-        st.error(f"🔴 **QQQM 매도: {qqqm_sell_shares}주** = ${qqqm_sell_value:,.2f}")
+        st.error(f"🔴 **QQQM 매도: {qqqm_sell_shares:,.2f}주** = ${qqqm_sell_value:,.2f}")
     else:
         qqqm_buy_shares = math.floor(diff_qqqm / qqqm_data['price'])
         if qqqm_buy_shares > 0:
             qqqm_buy_value = qqqm_buy_shares * qqqm_data['price']
-            st.success(f"🟢 **QQQM 매수: {qqqm_buy_shares}주** = ${qqqm_buy_value:,.2f}")
+            st.success(f"🟢 **QQQM 매수: {qqqm_buy_shares:,.2f}주** = ${qqqm_buy_value:,.2f}")
         else:
             st.write("⚪ QQQM: 유지")
     
@@ -1767,14 +1775,14 @@ elif is_smart_shoulder:
         schd_buy_shares = math.floor(diff_schd / schd_data['price'])
         if schd_buy_shares > 0:
             schd_buy_value = schd_buy_shares * schd_data['price']
-            st.success(f"🟢 **SCHD 매수: {schd_buy_shares}주** = ${schd_buy_value:,.2f}")
+            st.success(f"🟢 **SCHD 매수: {schd_buy_shares:,.2f}주** = ${schd_buy_value:,.2f}")
         else:
             st.write("⚪ SCHD: 유지")
     else:
         schd_sell_shares = math.ceil(abs(diff_schd) / schd_data['price'])
         if schd_sell_shares > 0:
             schd_sell_value = schd_sell_shares * schd_data['price']
-            st.error(f"🔴 **SCHD 매도: {schd_sell_shares}주** = ${schd_sell_value:,.2f}")
+            st.error(f"🔴 **SCHD 매도: {schd_sell_shares:,.2f}주** = ${schd_sell_value:,.2f}")
         else:
             st.write("⚪ SCHD: 유지")
     
@@ -1783,14 +1791,14 @@ elif is_smart_shoulder:
         iau_buy_shares = math.floor(diff_iau / iau_data['price'])
         if iau_buy_shares > 0:
             iau_buy_value = iau_buy_shares * iau_data['price']
-            st.success(f"🟢 **IAU 매수: {iau_buy_shares}주** = ${iau_buy_value:,.2f}")
+            st.success(f"🟢 **IAU 매수: {iau_buy_shares:,.2f}주** = ${iau_buy_value:,.2f}")
         else:
             st.write("⚪ IAU: 유지")
     else:
         iau_sell_shares = math.ceil(abs(diff_iau) / iau_data['price'])
         if iau_sell_shares > 0:
             iau_sell_value = iau_sell_shares * iau_data['price']
-            st.error(f"🔴 **IAU 매도: {iau_sell_shares}주** = ${iau_sell_value:,.2f}")
+            st.error(f"🔴 **IAU 매도: {iau_sell_shares:,.2f}주** = ${iau_sell_value:,.2f}")
         else:
             st.write("⚪ IAU: 유지")
     
@@ -1800,7 +1808,7 @@ elif is_smart_shoulder:
     elif diff_cash < 0:
         sgov_sell_shares = math.ceil(abs(diff_cash) / sgov_price)
         sgov_sell_value = sgov_sell_shares * sgov_price
-        st.error(f"🔴 **SGOV 매도: {sgov_sell_shares}주** = ${sgov_sell_value:,.2f}")
+        st.error(f"🔴 **SGOV 매도: {sgov_sell_shares:,.2f}주** = ${sgov_sell_value:,.2f}")
     else:
         st.write("⚪ 현금: 유지")
     
@@ -1817,7 +1825,7 @@ elif is_over_77:
     </div>
     """, unsafe_allow_html=True)
     
-    st.write(f"**현재 QQQM 비중:** {qqqm_pct:.1f}%")
+    st.write(f"**현재 QQQM 비중:** {qqqm_pct:.2f}%")
     st.write(f"**20일선 상태:** {'❌ 하향돌파' if condition_2_below_sma20 else '✅ 20일선 위 (${:.2f})'.format(qqqm_data['sma_20'])}")
     st.write(f"**전고점 상태:** {'⚠️ 최근 신고가 갱신' if condition_3_after_high else '✅ 신고가 미갱신'}")
     
@@ -1837,9 +1845,9 @@ elif is_over_77:
         new_schd_value = new_schd_shares * schd_data['price']
         new_iau_value = new_iau_shares * iau_data['price']
         
-        st.write(f"• **QQQM (72%): {new_qqqm_shares}주** = ${new_qqqm_value:,.2f}")
-        st.write(f"• **SCHD (16%): {new_schd_shares}주** = ${new_schd_value:,.2f}")
-        st.write(f"• **IAU (2%): {new_iau_shares}주** = ${new_iau_value:,.2f}")
+        st.write(f"• **QQQM (72%): {new_qqqm_shares:,.2f}주** = ${new_qqqm_value:,.2f}")
+        st.write(f"• **SCHD (16%): {new_schd_shares:,.2f}주** = ${new_schd_value:,.2f}")
+        st.write(f"• **IAU (2%): {new_iau_shares:,.2f}주** = ${new_iau_value:,.2f}")
         st.write(f"• **SGOV (10%): ${new_sgov_value:,.2f}**")
         
         new_total_use = new_qqqm_value + new_schd_value + new_iau_value + new_sgov_value
@@ -1871,9 +1879,9 @@ elif has_new_cash:
     st.success(f"💰 신규 자금 배분 (${new_cash:,.2f})")
     
     st.write("**매수 계획 (실행 가능한 주식 수):**")
-    st.write(f"• **QQQM: {normal_qqqm_shares}주** = ${normal_qqqm_value:,.2f}")
-    st.write(f"• **SCHD: {normal_schd_shares}주** = ${normal_schd_value:,.2f}")
-    st.write(f"• **IAU: {normal_iau_shares}주** = ${normal_iau_value:,.2f}")
+    st.write(f"• **QQQM: {normal_qqqm_shares:,.2f}주** = ${normal_qqqm_value:,.2f}")
+    st.write(f"• **SCHD: {normal_schd_shares:,.2f}주** = ${normal_schd_value:,.2f}")
+    st.write(f"• **IAU: {normal_iau_shares:,.2f}주** = ${normal_iau_value:,.2f}")
     st.write(f"• **SGOV: ${normal_sgov_value:,.2f}**")
     
     normal_total_use = normal_qqqm_value + normal_schd_value + normal_iau_value + normal_sgov_value
@@ -1881,9 +1889,9 @@ elif has_new_cash:
     st.caption(f"💡 실제 사용: ${normal_total_use:,.2f} | 잔액: ${normal_remaining:,.2f}")
     
     st.info(f"""💡 **투자 후 예상 비중**  
-    QQQM: {((qqqm_value + normal_qqqm_value) / (total_value + normal_total_use) * 100):.1f}% | 
-    SCHD: {((schd_value + normal_schd_value) / (total_value + normal_total_use) * 100):.1f}% | 
-    IAU: {((iau_value + normal_iau_value) / (total_value + normal_total_use) * 100):.1f}%""")
+    QQQM: {((qqqm_value + normal_qqqm_value) / (total_value + normal_total_use) * 100):.2f}% | 
+    SCHD: {((schd_value + normal_schd_value) / (total_value + normal_total_use) * 100):.2f}% | 
+    IAU: {((iau_value + normal_iau_value) / (total_value + normal_total_use) * 100):.2f}%""")
 
 # 정상 상황: 신규 자금 없음
 else:
@@ -2209,7 +2217,7 @@ with col2:
                 border: 2px solid {port_color}; border-radius: 12px; padding: 20px; text-align: center;">
         <p style="color: #cbd5e1; font-size: 0.9em; margin: 0 0 8px 0;">예상 손익</p>
         <p style="color: {port_color}; font-size: 2.4em; font-weight: 800; margin: 0;">
-            {'+' if portfolio_daily_change >= 0 else ''}${portfolio_daily_change:,.0f}
+            {'+' if portfolio_daily_change >= 0 else ''}${portfolio_daily_change:,.2f}
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -2449,7 +2457,7 @@ if gs_available:
                         mode='markers+text',
                         name='최고점',
                         marker=dict(size=12, color='#ef4444', symbol='triangle-up'),
-                        text=[f"${filtered_df.loc[max_idx, 'TotalValue']:,.0f}"],
+                        text=[f"${filtered_df.loc[max_idx, 'TotalValue']:,.2f}"],
                         textposition='top center',
                         textfont=dict(color='#ef4444', size=11),
                         hovertemplate='<b>최고점</b><br>%{x|%Y-%m-%d}<br>$%{y:,.2f}<extra></extra>'
@@ -2461,7 +2469,7 @@ if gs_available:
                         mode='markers+text',
                         name='최저점',
                         marker=dict(size=12, color='#3b82f6', symbol='triangle-down'),
-                        text=[f"${filtered_df.loc[min_idx, 'TotalValue']:,.0f}"],
+                        text=[f"${filtered_df.loc[min_idx, 'TotalValue']:,.2f}"],
                         textposition='bottom center',
                         textfont=dict(color='#3b82f6', size=11),
                         hovertemplate='<b>최저점</b><br>%{x|%Y-%m-%d}<br>$%{y:,.2f}<extra></extra>'
@@ -2538,13 +2546,13 @@ if gs_available:
                     
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("시작", f"${period_first:,.0f}")
+                        st.metric("시작", f"${period_first:,.2f}")
                     with col2:
-                        st.metric("현재", f"${period_last:,.0f}", f"{period_change_pct:+.1f}%")
+                        st.metric("현재", f"${period_last:,.2f}", f"{period_change_pct:+.2f}%")
                     with col3:
-                        st.metric("최고", f"${period_max:,.0f}", f"+${period_max - period_first:,.0f}")
+                        st.metric("최고", f"${period_max:,.2f}", f"+${period_max - period_first:,.2f}")
                     with col4:
-                        st.metric("최저", f"${period_min:,.0f}", f"${period_min - period_first:,.0f}")
+                        st.metric("최저", f"${period_min:,.2f}", f"${period_min - period_first:,.2f}")
                     
                 else:
                     st.warning("선택한 기간에 데이터가 없습니다.")

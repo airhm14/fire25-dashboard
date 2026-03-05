@@ -17,6 +17,13 @@ def fmt_money(x):
 def fmt_num(x, d=2):
     return f"{x:,.{d}f}" if x is not None else "N/A"
 
+
+def compute_puddle_deployment(stage: int, remaining_cash: float) -> float:
+    """Compute stage deployment from remaining cash snapshot."""
+    rates = {1: 0.15, 2: 0.35, 3: 0.50, 4: 1.00}
+    rate = rates.get(stage, 0.0)
+    return remaining_cash * rate
+
 # Google Sheets 관련 import
 try:
     import gspread
@@ -905,9 +912,11 @@ if puddle_alert:
     
     info = stage_info[puddle_stage]
     
-    # 현금성 자산 = SGOV + 예수금 (V5.10 기준)
-    cash_base = sgov_value + cash_deposit
-    injection_amount = cash_base * (info["rate"] / 100)
+    # Dashboard policy: use current account snapshot only.
+    # Backtests/simulations should track remaining_cash internally across events.
+    remaining_cash = sgov_value + cash_deposit
+    injection_amount = compute_puddle_deployment(puddle_stage, remaining_cash)
+    cash_base = remaining_cash
     
     # 이동평균선 값들
     sma_50_val = f"${qqqm_data['sma_50']:.2f}" if pd.notna(qqqm_data['sma_50']) else "N/A"
@@ -1540,7 +1549,7 @@ if is_defcon:
             stage_info = {1: 15, 2: 35}
             rate = stage_info[puddle_stage]
             cash_base = sgov_value + cash_deposit
-            injection = cash_base * (rate / 100)
+            injection = compute_puddle_deployment(puddle_stage, cash_base)
             
             st.warning(f"📊 기존 현금으로 웅덩이 매수 ({rate}%)")
             st.write(f"• 현금성 자산: ${cash_base:,.2f}")
@@ -1618,10 +1627,11 @@ elif is_puddle:
     # 웅덩이 대응 계산 (V5.10)
     import math
     
-    # 현금성 자산 = SGOV + 예수금
-    cash_base = sgov_value + cash_deposit
-    injection_rate = info["rate"] / 100
-    injection_amount = cash_base * injection_rate
+    # Dashboard policy: use current account snapshot only.
+    # Backtests/simulations should track remaining_cash internally across events.
+    remaining_cash = sgov_value + cash_deposit
+    injection_amount = compute_puddle_deployment(puddle_stage, remaining_cash)
+    cash_base = remaining_cash
     
     # SGOV에서 매도할 금액 계산 (예수금 먼저 사용, 부족하면 SGOV 매도)
     if injection_amount <= cash_deposit:

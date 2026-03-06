@@ -1,5 +1,7 @@
 streamlit
 yfinance
+pykrx
+pyupbit
 pandas
 gspread
 google-auth

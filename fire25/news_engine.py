@@ -1,203 +1,456 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+import html
+import re
 from urllib.parse import quote_plus
-import xml.etree.ElementTree as ET
 
-import requests
+try:
+    import feedparser
+except Exception:  # pragma: no cover - runtime-safe fallback
+    feedparser = None
 
 
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
 
+CATEGORY_KEYWORDS = {
+    "FED": [
+        "federal reserve",
+        "fed",
+        "powell",
+        "rate cut",
+        "rate hike",
+        "interest rate",
+        "fomc",
+    ],
+    "BOND_YIELD": [
+        "treasury yield",
+        "10-year yield",
+        "bond yield",
+        "long-term yields",
+        "treasury",
+        "yield",
+    ],
+    "INFLATION": [
+        "inflation",
+        "cpi",
+        "ppi",
+        "core inflation",
+        "prices",
+        "pce",
+    ],
+    "LABOR": ["jobs", "payrolls", "unemployment", "labor market", "hiring"],
+    "GROWTH": ["gdp", "recession", "consumer spending", "economic slowdown", "growth"],
+    "TECH_AI": ["ai", "artificial intelligence", "nvidia", "semiconductor", "big tech", "cloud"],
+    "GEOPOLITICS": ["tariff", "war", "sanction", "china", "middle east", "trade tension"],
+    "RISK": ["volatility", "selloff", "correction", "market turmoil", "risk-off", "vix"],
+}
 
-def _parse_pub_datetime(value: str) -> datetime:
-    """Parse RSS pubDate into timezone-aware datetime."""
-    if not value:
-        return datetime.min.replace(tzinfo=timezone.utc)
-    try:
-        dt = parsedate_to_datetime(value)
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt
-    except Exception:
-        return datetime.min.replace(tzinfo=timezone.utc)
+CATEGORY_WEIGHTS = {
+    "FED": 1.5,
+    "BOND_YIELD": 1.4,
+    "INFLATION": 1.4,
+    "LABOR": 1.1,
+    "GROWTH": 1.2,
+    "TECH_AI": 1.2,
+    "GEOPOLITICS": 1.3,
+    "RISK": 1.5,
+    "OTHER": 0.5,
+}
+
+POSITIVE_PHRASES = [
+    "rate cut",
+    "cooling inflation",
+    "ai demand",
+    "recovery",
+    "optimism",
+    "beat expectations",
+]
+
+NEGATIVE_PHRASES = [
+    "rate hike",
+    "hot inflation",
+    "selloff",
+    "recession",
+    "war",
+    "tariff",
+    "volatility",
+    "uncertainty",
+]
+
+DEFAULT_QUERIES = [
+    "Federal Reserve markets",
+    "US Treasury yields stock market",
+    "inflation stock market",
+    "AI big tech stocks",
+    "market volatility VIX",
+    "US recession outlook",
+]
 
 
-def get_google_news_rss(query: str, limit: int = 5) -> list[dict]:
-    """Fetch Google News RSS headlines for a query without API key."""
-    if not query:
+def _now_str() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _fallback_output(message: str = "뉴스 데이터 수집 실패") -> dict:
+    return {
+        "status": "fallback",
+        "as_of": _now_str(),
+        "article_count": 0,
+        "headline_summary": f"{message}로 지표 기반 해석을 우선 적용합니다.",
+        "macro_drivers": ["뉴스 입력 없음: VIX/금리/심리 지표 중심 판단"],
+        "market_implication": "단기적으로는 변동성 지표와 장기금리 방향을 우선 점검하는 접근이 유효합니다.",
+        "watch_points": ["미국 10년물 금리", "VIX 방향성", "연준 발언"],
+        "sentiment_score": 0.0,
+        "risk_level": "MODERATE",
+        "articles": [],
+    }
+
+
+def _region_params(region: str) -> tuple[str, str, str]:
+    region_map = {
+        "US": ("en-US", "US", "US:en"),
+        "KR": ("ko", "KR", "KR:ko"),
+    }
+    return region_map.get((region or "US").upper(), region_map["US"])
+
+
+def _clean_text(value: str) -> str:
+    text = html.unescape(value or "")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _entry_datetime(entry) -> datetime:
+    if getattr(entry, "published_parsed", None):
+        try:
+            t = entry.published_parsed
+            return datetime(t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, tzinfo=timezone.utc)
+        except Exception:
+            pass
+    published = _clean_text(getattr(entry, "published", ""))
+    if published:
+        try:
+            dt = parsedate_to_datetime(published)
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            pass
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def fetch_google_news(
+    queries: list[str],
+    region: str = "US",
+    max_per_query: int = 8,
+) -> list[dict]:
+    """Fetch raw articles from Google News RSS using feedparser."""
+    if not queries:
+        return []
+    if feedparser is None:
         return []
 
-    url = (
-        f"{GOOGLE_NEWS_RSS}?q={quote_plus(query)}"
-        "&hl=en-US&gl=US&ceid=US:en"
-    )
+    hl, gl, ceid = _region_params(region)
+    items: list[dict] = []
 
-    try:
-        resp = requests.get(url, timeout=10)
-        if resp.status_code != 200:
-            return []
+    for query in queries:
+        q = (query or "").strip()
+        if not q:
+            continue
+        url = f"{GOOGLE_NEWS_RSS}?q={quote_plus(q)}&hl={hl}&gl={gl}&ceid={ceid}"
+        try:
+            feed = feedparser.parse(url)
+            entries = getattr(feed, "entries", [])[: max(1, max_per_query)]
+            for entry in entries:
+                source_obj = getattr(entry, "source", None)
+                if isinstance(source_obj, dict):
+                    source = _clean_text(source_obj.get("title", ""))
+                else:
+                    source = _clean_text(getattr(source_obj, "title", ""))
 
-        root = ET.fromstring(resp.content)
-        out: list[dict] = []
-        for item in root.findall(".//item"):
-            title = (item.findtext("title") or "").strip()
-            if not title:
-                continue
+                dt = _entry_datetime(entry)
+                published_iso = dt.isoformat() if dt != datetime.min.replace(tzinfo=timezone.utc) else ""
+                items.append(
+                    {
+                        "title": _clean_text(getattr(entry, "title", "")),
+                        "link": _clean_text(getattr(entry, "link", "")),
+                        "published": published_iso,
+                        "source": source or "Google News",
+                        "summary": _clean_text(getattr(entry, "summary", "")),
+                        "query": q,
+                    }
+                )
+        except Exception:
+            continue
+    return items
 
-            source = (item.findtext("source") or "Google News").strip()
-            published = (item.findtext("pubDate") or "").strip()
-            out.append(
-                {
-                    "title": title,
-                    "source": source,
-                    "published": published,
-                    "query": query,
-                }
-            )
-            if len(out) >= max(1, limit):
-                break
-        return out
-    except Exception:
+
+def normalize_articles(raw_articles: list[dict], lookback_days: int = 2) -> list[dict]:
+    """Normalize article text and apply lookback filter."""
+    if not raw_articles:
         return []
 
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(0, lookback_days))
+    normalized: list[dict] = []
 
-def get_macro_market_news(limit: int = 8) -> list[dict]:
-    """Collect and merge macro-relevant market headlines from Google News RSS."""
-    queries = [
-        "Federal Reserve stock market",
-        "US economy inflation",
-        "Nasdaq AI stocks",
-        "Treasury yields market",
-        "China economy markets",
-    ]
-
-    per_query = max(3, min(6, limit))
-    merged: list[dict] = []
-    for q in queries:
-        merged.extend(get_google_news_rss(q, limit=per_query))
-
-    seen: set[str] = set()
-    unique_items: list[dict] = []
-    for item in merged:
-        title = (item.get("title") or "").strip()
+    for article in raw_articles:
+        title = _clean_text(article.get("title", ""))
         if not title:
             continue
-        key = title.lower()
-        if key in seen:
+
+        published_raw = _clean_text(article.get("published", ""))
+        published_dt = datetime.min.replace(tzinfo=timezone.utc)
+        if published_raw:
+            try:
+                published_dt = datetime.fromisoformat(published_raw.replace("Z", "+00:00"))
+                if published_dt.tzinfo is None:
+                    published_dt = published_dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                published_dt = datetime.min.replace(tzinfo=timezone.utc)
+
+        if lookback_days > 0 and published_dt != datetime.min.replace(tzinfo=timezone.utc):
+            if published_dt < cutoff:
+                continue
+
+        normalized.append(
+            {
+                "title": title,
+                "link": _clean_text(article.get("link", "")),
+                "published": published_dt.isoformat() if published_dt != datetime.min.replace(tzinfo=timezone.utc) else "",
+                "source": _clean_text(article.get("source", "")) or "Google News",
+                "summary": _clean_text(article.get("summary", "")),
+                "query": _clean_text(article.get("query", "")),
+            }
+        )
+
+    normalized.sort(key=lambda x: x.get("published", ""), reverse=True)
+    return normalized
+
+
+def deduplicate_articles(articles: list[dict]) -> list[dict]:
+    """Deduplicate articles by normalized title (v1 rule)."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for article in articles:
+        key = (article.get("title", "").strip().lower())
+        if not key or key in seen:
             continue
         seen.add(key)
-        unique_items.append(item)
-
-    unique_items.sort(
-        key=lambda x: _parse_pub_datetime(x.get("published", "")),
-        reverse=True,
-    )
-    return unique_items[: max(1, limit)]
+        out.append(article)
+    return out
 
 
-def classify_news_topic(title: str) -> str:
-    """Classify a headline into a simple macro topic bucket."""
-    text = (title or "").lower()
+def classify_article(article: dict) -> tuple[str, dict[str, int]]:
+    """Classify article into one primary macro category by keyword hits."""
+    text = f"{article.get('title', '')} {article.get('summary', '')}".lower()
 
-    topic_rules = [
-        ("FED", ["fed", "powell", "fomc", "rate", "rates", "federal reserve", "hawkish", "dovish"]),
-        ("INFLATION", ["inflation", "cpi", "pce", "consumer prices", "price pressure"]),
-        ("AI", ["ai", "artificial intelligence", "nvidia", "chip", "chips", "semiconductor"]),
-        ("BOND", ["treasury", "yield", "yields", "bond", "bonds", "10-year"]),
-        ("CHINA", ["china", "beijing", "chinese", "yuan"]),
-        ("ENERGY", ["oil", "crude", "opec", "energy", "gas"]),
-    ]
+    score_map: dict[str, int] = {}
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        hits = sum(1 for kw in keywords if kw in text)
+        score_map[category] = hits
 
-    for topic, keywords in topic_rules:
-        if any(k in text for k in keywords):
-            return topic
-    return "GENERAL"
+    best_category = "OTHER"
+    best_score = 0
+    for category, score in score_map.items():
+        if score > best_score:
+            best_category = category
+            best_score = score
 
-
-def _topic_label_ko(topic: str) -> str:
-    mapping = {
-        "FED": "연준/금리",
-        "INFLATION": "인플레이션",
-        "AI": "AI/반도체",
-        "BOND": "국채금리",
-        "CHINA": "중국 경기",
-        "ENERGY": "에너지",
-        "GENERAL": "거시 일반",
-    }
-    return mapping.get(topic, "거시 일반")
+    if best_score == 0:
+        return "OTHER", score_map
+    return best_category, score_map
 
 
-def _build_watchpoints(dominant_topics: list[str]) -> list[str]:
-    watch = []
+def score_article_impact(article: dict, keyword_score: int) -> tuple[float, float]:
+    """Return (impact_score, sentiment) using rule-based phrase scoring."""
+    text = f"{article.get('title', '')} {article.get('summary', '')}".lower()
 
-    if "FED" in dominant_topics or "INFLATION" in dominant_topics:
-        watch.append("미국 물가 지표(CPI/PCE)와 연준 인사 발언의 톤 변화를 확인할 필요가 있습니다.")
-    if "BOND" in dominant_topics:
-        watch.append("미국 10년물 금리와 VIX의 동반 상승 여부를 유심히 볼 필요가 있습니다.")
-    if "AI" in dominant_topics:
-        watch.append("AI/반도체 대형주의 실적 가이던스가 나스닥 심리를 좌우할 수 있습니다.")
-    if "CHINA" in dominant_topics:
-        watch.append("중국 경기 지표와 정책 부양 강도가 원자재 및 위험자산 심리에 영향을 줄 수 있습니다.")
-    if "ENERGY" in dominant_topics:
-        watch.append("유가 급등 여부가 기대 인플레이션과 장기금리 재상승 압력으로 이어지는지 점검이 필요합니다.")
+    pos_hits = sum(1 for w in POSITIVE_PHRASES if w in text)
+    neg_hits = sum(1 for w in NEGATIVE_PHRASES if w in text)
 
-    if not watch:
-        watch = [
-            "단기적으로는 VIX 방향성과 나스닥 추세의 동행 여부를 확인할 필요가 있습니다.",
-            "거시 이벤트 발표 전후 금리 변동성이 확대되는지 점검하는 것이 좋습니다.",
-        ]
+    if pos_hits == 0 and neg_hits == 0:
+        sentiment = 0.0
+    else:
+        sentiment = (pos_hits - neg_hits) / max(1, pos_hits + neg_hits)
+        sentiment = max(-1.0, min(1.0, sentiment))
 
-    return watch[:2]
+    category = article.get("category", "OTHER")
+    base_weight = CATEGORY_WEIGHTS.get(category, CATEGORY_WEIGHTS["OTHER"])
+
+    magnitude = 1.0 + (0.20 * keyword_score) + (0.15 * abs(sentiment))
+    impact_score = round(base_weight * magnitude, 3)
+    return impact_score, round(sentiment, 3)
 
 
-def build_news_macro_brief(news_items: list[dict]) -> dict:
-    """Build deterministic Korean macro briefing from headlines."""
-    if not news_items:
+def aggregate_news_signal(articles: list[dict]) -> dict:
+    """Aggregate article-level signals into macro drivers and risk metrics."""
+    if not articles:
         return {
-            "headline_summary": [
-                "최근 뚜렷한 매크로 헤드라인 유입이 제한적이라 지표 중심 해석이 유효합니다.",
-                "단기적으로는 변동성 지표와 금리 흐름이 시장 심리를 좌우할 가능성이 큽니다.",
-                "앞으로는 주요 경제지표 발표 구간에서 위험선호 변화 여부를 확인할 필요가 있습니다.",
-            ],
-            "watchpoints": [
-                "VIX와 장기금리의 동반 상승 여부를 우선 점검하세요.",
-                "나스닥 추세와 거래대금 회복 여부를 함께 확인하세요.",
-            ],
-            "dominant_topics": ["GENERAL"],
+            "sentiment_score": 0.0,
+            "risk_level": "MODERATE",
+            "dominant_categories": ["OTHER"],
+            "macro_drivers": ["주요 카테고리 신호가 부족해 지표 기반 해석이 우선됩니다."],
         }
 
-    top_items = news_items[:5]
-    topics = [classify_news_topic(item.get("title", "")) for item in top_items]
-    counts = Counter(topics)
-    dominant_topics = [k for k, _ in counts.most_common(3)]
+    sentiments = [float(a.get("sentiment", 0.0)) for a in articles]
+    avg_sentiment = round(sum(sentiments) / len(sentiments), 3)
 
-    dominant_ko = [_topic_label_ko(t) for t in dominant_topics]
-    first_title = (top_items[0].get("title") or "").strip()
-    first_source = (top_items[0].get("source") or "주요 외신").strip()
-
-    headline_summary = [
-        f"최근 {', '.join(dominant_ko)} 이슈가 동시에 부각되며 단기 매크로 변동성이 커지는 분위기입니다.",
-        f"대표 헤드라인(출처: {first_source})은 '{first_title}'로, 위험선호 심리에 직접적인 영향을 줄 수 있습니다.",
-    ]
-
-    if "AI" in dominant_topics:
-        headline_summary.append("특히 AI/반도체 관련 뉴스는 기술주 심리와 나스닥 방향성에 민감하게 작용할 수 있습니다.")
-    elif "FED" in dominant_topics or "INFLATION" in dominant_topics:
-        headline_summary.append("금리 경로 불확실성이 다시 부각되면서 성장주와 장기채의 변동성 확대 가능성을 경계할 필요가 있습니다.")
-    elif "BOND" in dominant_topics:
-        headline_summary.append("장기금리 뉴스 흐름이 밸류에이션 부담으로 연결될 수 있어 멀티플 민감 업종 변동성에 유의해야 합니다.")
-    elif "CHINA" in dominant_topics:
-        headline_summary.append("중국 경기 관련 뉴스는 글로벌 수요 기대를 통해 원자재 및 경기민감주 심리에 파급될 수 있습니다.")
+    if avg_sentiment <= -0.5:
+        risk_level = "HIGH"
+    elif avg_sentiment <= 0.2:
+        risk_level = "MODERATE"
     else:
-        headline_summary.append("당분간은 개별 뉴스보다 금리·변동성 같은 핵심 매크로 축의 방향을 우선 점검하는 접근이 유효합니다.")
+        risk_level = "LOW"
 
-    watchpoints = _build_watchpoints(dominant_topics)
+    category_counter = Counter(a.get("category", "OTHER") for a in articles)
+    dominant_categories = [k for k, _ in category_counter.most_common(3)]
+
+    label_map = {
+        "FED": "연준/금리",
+        "BOND_YIELD": "국채금리",
+        "INFLATION": "인플레이션",
+        "LABOR": "고용",
+        "GROWTH": "경기성장",
+        "TECH_AI": "AI/기술",
+        "GEOPOLITICS": "지정학",
+        "RISK": "위험심리",
+        "OTHER": "기타",
+    }
+
+    macro_drivers = []
+    for cat in dominant_categories:
+        label = label_map.get(cat, "기타")
+        share = category_counter[cat] / len(articles)
+        macro_drivers.append(f"{label} 이슈 비중이 {share * 100:.0f}%로 상대적으로 높습니다.")
 
     return {
-        "headline_summary": headline_summary[:3],
-        "watchpoints": watchpoints[:2],
-        "dominant_topics": dominant_topics,
+        "sentiment_score": avg_sentiment,
+        "risk_level": risk_level,
+        "dominant_categories": dominant_categories,
+        "macro_drivers": macro_drivers[:3],
     }
+
+
+def generate_macro_brief(articles: list[dict], signal: dict, asset_focus: str = "growth") -> dict:
+    """Generate investor-friendly Korean macro briefing text."""
+    if not articles:
+        return {
+            "headline_summary": "최근 확인 가능한 핵심 뉴스가 제한적이어서 지표 중심의 보수적 해석이 유효합니다.",
+            "macro_drivers": signal.get("macro_drivers", []),
+            "market_implication": "방향성 확신보다 변동성 관리에 우선순위를 두는 접근이 적절합니다.",
+            "watch_points": ["미국 10년물 금리", "VIX 방향성", "연준 발언"],
+        }
+
+    top = articles[:5]
+    lead = top[0]
+    lead_title = lead.get("title", "주요 매크로 뉴스")
+    lead_source = lead.get("source", "주요 외신")
+
+    dom = signal.get("dominant_categories", ["OTHER"])
+    dom_text_map = {
+        "FED": "연준 정책",
+        "BOND_YIELD": "장기금리",
+        "INFLATION": "물가",
+        "LABOR": "고용",
+        "GROWTH": "경기",
+        "TECH_AI": "AI/기술",
+        "GEOPOLITICS": "지정학",
+        "RISK": "위험심리",
+        "OTHER": "거시 일반",
+    }
+    dom_ko = [dom_text_map.get(x, "거시 일반") for x in dom[:2]]
+    dom_phrase = "·".join(dom_ko)
+
+    headline_summary = (
+        f"최근 {dom_phrase} 이슈가 동시 부각되며 시장의 단기 방향성 변동이 커진 모습입니다. "
+        f"대표 뉴스({lead_source})인 '{lead_title}'는 투자심리에 직접적인 영향을 줄 수 있습니다."
+    )
+
+    sentiment_score = float(signal.get("sentiment_score", 0.0))
+    if sentiment_score <= -0.2:
+        implication = "단기적으로 위험자산 변동성 확대 가능성이 있어 방어 비중 관리와 분할 접근이 유효합니다."
+    elif sentiment_score >= 0.2:
+        implication = "단기 심리가 개선 국면이라 추세 추종이 가능하지만, 과열 신호 병행 점검이 필요합니다."
+    else:
+        implication = "명확한 한 방향 신호가 약해 지표 확인 후 단계적으로 대응하는 전략이 적절합니다."
+
+    watch_points = ["미국 10년물 금리", "VIX 방향성", "연준 발언"]
+    if "TECH_AI" in dom:
+        watch_points.append("대형 기술주/반도체 뉴스 흐름")
+    if "INFLATION" in dom:
+        watch_points.append("CPI/PCE 물가 지표")
+    if "GEOPOLITICS" in dom:
+        watch_points.append("무역/관세 관련 정책 헤드라인")
+
+    if (asset_focus or "").lower() == "growth":
+        watch_points.insert(0, "나스닥 대형 성장주 심리")
+
+    dedup_watch = []
+    for item in watch_points:
+        if item not in dedup_watch:
+            dedup_watch.append(item)
+
+    return {
+        "headline_summary": headline_summary,
+        "macro_drivers": signal.get("macro_drivers", [])[:3],
+        "market_implication": implication,
+        "watch_points": dedup_watch[:4],
+    }
+
+
+def get_news_brief(
+    lookback_days: int = 2,
+    max_articles: int = 20,
+    region: str = "US",
+    asset_focus: str = "growth",
+) -> dict:
+    """Public API: return structured news-based macro briefing.
+
+    The function is fault-tolerant and always returns a dict shape.
+    """
+    try:
+        queries = list(DEFAULT_QUERIES)
+        if (asset_focus or "").lower() == "growth":
+            queries.append("Nasdaq growth stocks outlook")
+
+        raw = fetch_google_news(queries=queries, region=region, max_per_query=8)
+        if not raw:
+            return _fallback_output("뉴스 RSS 응답 부재")
+
+        normalized = normalize_articles(raw, lookback_days=lookback_days)
+        deduped = deduplicate_articles(normalized)
+        articles = deduped[: max(1, max_articles)]
+
+        enriched = []
+        for article in articles:
+            category, score_map = classify_article(article)
+            keyword_score = max(score_map.values()) if score_map else 0
+
+            article_copy = dict(article)
+            article_copy["category"] = category
+            impact_score, sentiment = score_article_impact(article_copy, keyword_score=keyword_score)
+            article_copy["impact_score"] = impact_score
+            article_copy["sentiment"] = sentiment
+            enriched.append(article_copy)
+
+        signal = aggregate_news_signal(enriched)
+        brief = generate_macro_brief(enriched, signal, asset_focus=asset_focus)
+
+        return {
+            "status": "ok",
+            "as_of": _now_str(),
+            "article_count": len(enriched),
+            "headline_summary": brief["headline_summary"],
+            "macro_drivers": brief["macro_drivers"],
+            "market_implication": brief["market_implication"],
+            "watch_points": brief["watch_points"],
+            "sentiment_score": signal["sentiment_score"],
+            "risk_level": signal["risk_level"],
+            "articles": enriched,
+        }
+    except Exception:
+        return _fallback_output("뉴스 엔진 처리 예외 발생")

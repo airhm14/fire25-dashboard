@@ -21,6 +21,7 @@ from fire25.strategy import (
     evaluate_smart_shoulder,
 )
 from fire25.macro_summary import summarize_macro_today
+from fire25.news_engine import get_macro_market_news, build_news_macro_brief
 from fire25.data_provider import detect_asset_type, get_market_data
 from fire25.fx_provider import get_fx_rate
 from fire25.indicator_engine import compute_indicators
@@ -1027,12 +1028,25 @@ st.caption(f"신뢰도: {current_confidence * 100:.1f}%")
 for item in current_reasons:
     st.markdown(f"- {item}")
 
+
+@st.cache_data(ttl=1800)
+def fetch_macro_market_news(limit=8):
+    """Fetch macro headlines with cache and safe fallback."""
+    try:
+        return get_macro_market_news(limit=limit)
+    except Exception:
+        return []
+
+
+market_news = fetch_macro_market_news(limit=8)
+news_brief = build_news_macro_brief(market_news)
+
 macro_summary = summarize_macro_today(
     vix_data=vix_data,
     fng_data=fng_data,
     qqqm_data=qqqm_data,
     sgov_data=sgov_data,
-    market_news=None,
+    market_news=market_news,
 )
 
 st.header("오늘의 거시경제 요약")
@@ -1044,6 +1058,25 @@ for line in macro_summary["bullets"]:
     st.markdown(f"- {line}")
 st.caption(macro_summary["title"])
 st.markdown(f"**시사점**: {macro_summary['implication']}")
+
+st.subheader("📰 주요 뉴스 헤드라인")
+if market_news:
+    for item in market_news[:5]:
+        title = (item.get("title") or "").strip()
+        source = (item.get("source") or "출처 미상").strip()
+        if title:
+            st.markdown(f"- {title} ({source})")
+else:
+    st.caption("현재 뉴스 데이터를 불러오지 못해 지표 기반 요약만 표시합니다.")
+
+st.subheader("👀 체크 포인트")
+watchpoints = news_brief.get("watchpoints", []) if news_brief else []
+if watchpoints:
+    for point in watchpoints[:2]:
+        st.markdown(f"- {point}")
+else:
+    st.markdown("- 장기금리와 VIX의 동반 상승 여부를 우선 점검하세요.")
+    st.markdown("- 나스닥 추세와 거래량 회복 여부를 함께 확인하세요.")
 
 st.markdown("---")
 

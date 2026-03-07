@@ -58,6 +58,33 @@ def summarize_macro_today(vix_data, fng_data, qqqm_data, sgov_data, market_news=
     if macro_tags:
         bullets.append(f"헤드라인 키워드: {', '.join(macro_tags)}")
 
+    news_brief = None
+    if market_news:
+        try:
+            from fire25.news_engine import build_news_macro_brief
+
+            news_brief = build_news_macro_brief(market_news)
+        except Exception:
+            news_brief = None
+
+    if news_brief and news_brief.get("headline_summary"):
+        for line in news_brief["headline_summary"][:2]:
+            bullets.append(line)
+
+        dominant_topics = news_brief.get("dominant_topics") or []
+        if dominant_topics:
+            topic_labels = {
+                "FED": "연준/금리",
+                "INFLATION": "인플레이션",
+                "AI": "AI/반도체",
+                "BOND": "국채금리",
+                "CHINA": "중국 경기",
+                "ENERGY": "에너지",
+                "GENERAL": "거시 일반",
+            }
+            labels = [topic_labels.get(t, "거시 일반") for t in dominant_topics[:3]]
+            bullets.append(f"뉴스 주도 이슈: {', '.join(labels)}")
+
     if risk_off_score >= 2:
         regime = "Risk-off"
         color = "#ef4444"
@@ -71,9 +98,12 @@ def summarize_macro_today(vix_data, fng_data, qqqm_data, sgov_data, market_news=
         color = "#f59e0b"
         implication = "중립 운용, 신호 기반 분할 접근"
 
+    if news_brief and news_brief.get("watchpoints"):
+        implication = f"{implication}. {news_brief['watchpoints'][0]}"
+
     return {
         "title": "거시 환경은 변동성/심리/헤드라인의 합성 신호로 판단했습니다.",
-        "bullets": bullets[:5],
+        "bullets": bullets[:6],
         "regime_label": regime,
         "color": color,
         "implication": implication,

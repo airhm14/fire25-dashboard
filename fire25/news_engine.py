@@ -90,6 +90,69 @@ DEFAULT_QUERIES = [
 ]
 
 
+def get_macro_market_news(limit: int = 8) -> list[dict]:
+    """Backward-compatible helper returning normalized macro headlines list.
+
+    Returned item fields are compatible with dashboard usage:
+    title, source, published, query, link, summary.
+    """
+    try:
+        raw = fetch_google_news(queries=DEFAULT_QUERIES, region="US", max_per_query=8)
+        normalized = normalize_articles(raw, lookback_days=2)
+        deduped = deduplicate_articles(normalized)
+        return deduped[: max(1, limit)]
+    except Exception:
+        return []
+
+
+def build_news_macro_brief(news_items: list[dict]) -> dict:
+    """Backward-compatible briefing format for existing dashboard integration.
+
+    Returns:
+    {
+        "headline_summary": [str, ...],
+        "watchpoints": [str, ...],
+        "dominant_topics": [str, ...],
+    }
+    """
+    if not news_items:
+        return {
+            "headline_summary": [
+                "최근 주요 매크로 뉴스 유입이 제한적이라 지표 기반 해석이 유효합니다.",
+                "단기적으로는 금리와 변동성 흐름을 중심으로 시장을 점검할 필요가 있습니다.",
+                "앞으로는 연준 발언과 장기금리 방향을 함께 확인하는 접근이 적절합니다.",
+            ],
+            "watchpoints": [
+                "미국 10년물 금리",
+                "VIX 방향성",
+            ],
+            "dominant_topics": ["OTHER"],
+        }
+
+    enriched = []
+    for article in news_items[:5]:
+        category, score_map = classify_article(article)
+        keyword_score = max(score_map.values()) if score_map else 0
+        a = dict(article)
+        a["category"] = category
+        impact_score, sentiment = score_article_impact(a, keyword_score=keyword_score)
+        a["impact_score"] = impact_score
+        a["sentiment"] = sentiment
+        enriched.append(a)
+
+    signal = aggregate_news_signal(enriched)
+    brief = generate_macro_brief(enriched, signal, asset_focus="growth")
+
+    return {
+        "headline_summary": [
+            brief.get("headline_summary", ""),
+            *(brief.get("macro_drivers", [])[:2]),
+        ][:3],
+        "watchpoints": brief.get("watch_points", [])[:2],
+        "dominant_topics": signal.get("dominant_categories", ["OTHER"]),
+    }
+
+
 def _now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

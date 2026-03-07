@@ -585,7 +585,7 @@ def get_stock_data(symbol, period="3mo", interval="day"):
                 'sma_100': latest['SMA_100'],
                 'sma_200': latest['SMA_200'],
                 'rsi': latest['RSI'],
-                'volume': latest['거래량'],
+                'volume': latest['Volume'],
                 'timestamp': latest.name,
                 'df': df
             }

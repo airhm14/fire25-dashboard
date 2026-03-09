@@ -26,13 +26,29 @@ ASSET_LIST = ["QQQM", "SCHD", "IAU", "SGOV"]
 TRUSTED_SOURCES = {
     "reuters.com": {"name": "Reuters", "tier": "core", "weight": 1.00},
     "bloomberg.com": {"name": "Bloomberg", "tier": "core", "weight": 1.00},
-    "cnbc.com": {"name": "CNBC", "tier": "core", "weight": 0.95},
-    "wsj.com": {"name": "WSJ", "tier": "core", "weight": 0.95},
-    "ft.com": {"name": "Financial Times", "tier": "core", "weight": 0.95},
+    "cnbc.com": {"name": "CNBC", "tier": "core", "weight": 1.00},
+    "wsj.com": {"name": "WSJ", "tier": "core", "weight": 1.00},
+    "ft.com": {"name": "Financial Times", "tier": "core", "weight": 1.00},
     "marketwatch.com": {"name": "MarketWatch", "tier": "secondary", "weight": 0.85},
     "finance.yahoo.com": {"name": "Yahoo Finance", "tier": "secondary", "weight": 0.80},
     "apnews.com": {"name": "Associated Press", "tier": "secondary", "weight": 0.85},
     "barrons.com": {"name": "Barron's", "tier": "secondary", "weight": 0.85},
+}
+
+SOURCE_NAME_HINTS = {
+    "reuters": "reuters.com",
+    "bloomberg": "bloomberg.com",
+    "cnbc": "cnbc.com",
+    "wsj": "wsj.com",
+    "wall street journal": "wsj.com",
+    "financial times": "ft.com",
+    " ft ": "ft.com",
+    "marketwatch": "marketwatch.com",
+    "yahoo finance": "finance.yahoo.com",
+    "associated press": "apnews.com",
+    "ap news": "apnews.com",
+    "barron's": "barrons.com",
+    "barrons": "barrons.com",
 }
 
 DEFAULT_QUERIES = [
@@ -42,6 +58,10 @@ DEFAULT_QUERIES = [
     "AI big tech stocks",
     "market volatility VIX",
     "US recession outlook",
+    "geopolitics market impact",
+    "middle east conflict oil market",
+    "iran israel war oil",
+    "energy supply disruption markets",
 ]
 
 DIRECT_TRUSTED_RSS = [
@@ -169,6 +189,11 @@ def _fallback_output(message: str = "뉴스 데이터 수집 실패") -> dict:
         "risk_level_label": "보통",
         "dominant_terms": [],
         "dominant_bigrams": [],
+        "raw_article_count": 0,
+        "normalized_article_count": 0,
+        "dropped_untrusted_count": 0,
+        "matched_core_count": 0,
+        "matched_secondary_count": 0,
         "articles": [],
         "brief_source": "rule_based",
     }
@@ -403,16 +428,23 @@ def extract_domain(url: str) -> str:
 
 
 def enrich_source_metadata(article: dict) -> dict:
-    """Attach trusted-source metadata and normalize source name."""
+    """Attach source metadata using both domain and source-title matching."""
     out = dict(article)
     domain = extract_domain(out.get("link", ""))
     out["domain"] = domain
+    source_text = f" {str(out.get('source', '')).strip().lower()} "
 
     matched_key = None
     for key in TRUSTED_SOURCES.keys():
         if domain == key or domain.endswith(f".{key}"):
             matched_key = key
             break
+
+    if not matched_key and source_text.strip():
+        for hint, key in SOURCE_NAME_HINTS.items():
+            if hint in source_text:
+                matched_key = key
+                break
 
     if matched_key:
         meta = TRUSTED_SOURCES[matched_key]
@@ -423,7 +455,7 @@ def enrich_source_metadata(article: dict) -> dict:
     else:
         out["source"] = out.get("source") or "기타 출처"
         out["source_tier"] = "unknown"
-        out["source_weight"] = 0.0
+        out["source_weight"] = 0.3
         out["trusted_source"] = False
 
     return out
@@ -495,7 +527,7 @@ def fetch_news_articles(queries: list[str], region: str = "US", max_per_query: i
 
 
 def normalize_articles(raw_articles: list[dict], lookback_days: int = 2) -> list[dict]:
-    """Normalize fields, enrich source metadata, and keep trusted sources only."""
+    """Normalize fields, enrich source metadata, and keep trusted+unknown sources."""
     if not raw_articles:
         return []
 
@@ -531,9 +563,6 @@ def normalize_articles(raw_articles: list[dict], lookback_days: int = 2) -> list
         }
 
         article = enrich_source_metadata(article)
-        if not article.get("trusted_source", False):
-            continue
-
         normalized.append(article)
 
     normalized.sort(key=lambda x: x.get("published", ""), reverse=True)
@@ -884,6 +913,11 @@ def get_news_brief(lookback_days=2, max_articles=20, region="US", asset_focus="g
             "risk_level_label": aggregated.get("risk_level_label", "보통"),
             "dominant_terms": theme_info.get("dominant_terms", []),
             "dominant_bigrams": theme_info.get("dominant_bigrams", []),
+            "raw_article_count": len(raw_articles),
+            "normalized_article_count": len(normalized),
+            "dropped_untrusted_count": 0,
+            "matched_core_count": sum(1 for a in normalized if a.get("source_tier") == "core"),
+            "matched_secondary_count": sum(1 for a in normalized if a.get("source_tier") == "secondary"),
             "core_article_count": aggregated.get("core_article_count", 0),
             "secondary_article_count": aggregated.get("secondary_article_count", 0),
             "articles": enriched,

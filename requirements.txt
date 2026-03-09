@@ -8,3 +8,5 @@ google-auth
 pytz
 requests
 plotly
+feedparser
+google-generativeai

@@ -21,7 +21,7 @@ from fire25.strategy import (
     evaluate_smart_shoulder,
 )
 from fire25.macro_summary import summarize_macro_today
-from fire25.news_engine import get_macro_market_news, build_news_macro_brief
+from fire25.news_engine import get_news_brief
 from fire25.data_provider import detect_asset_type, get_market_data
 from fire25.fx_provider import get_fx_rate
 from fire25.indicator_engine import compute_indicators
@@ -1030,16 +1030,43 @@ for item in current_reasons:
 
 
 @st.cache_data(ttl=1800)
-def fetch_macro_market_news(limit=8):
-    """Fetch macro headlines with cache and safe fallback."""
+def fetch_news_brief(lookback_days=2, max_articles=20, region="US", asset_focus="growth"):
+    """뉴스 기반 거시 브리핑 캐시 fetch."""
     try:
-        return get_macro_market_news(limit=limit)
+        return get_news_brief(
+            lookback_days=lookback_days,
+            max_articles=max_articles,
+            region=region,
+            asset_focus=asset_focus,
+        )
     except Exception:
-        return []
+        return {
+            "status": "fallback",
+            "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "article_count": 0,
+            "headline_summary": "뉴스 데이터를 불러오지 못해 지표 기반 요약을 우선 표시합니다.",
+            "macro_drivers": [],
+            "market_implication": "변동성 지표와 금리 흐름을 중심으로 보수적으로 대응하세요.",
+            "portfolio_implication": "전략 신호와 현금성 자산 비중을 기준으로 단계적으로 대응하세요.",
+            "asset_implications": {
+                "QQQM": "금리와 변동성 민감도를 우선 점검하세요.",
+                "SCHD": "배당/퀄리티 방어 특성을 점검하세요.",
+                "IAU": "실질금리와 안전자산 수요를 확인하세요.",
+                "SGOV": "현금성 완충 기능을 유지하세요.",
+            },
+            "watch_points": ["미국 10년물 금리 방향", "VIX 재상승 여부"],
+            "sentiment_score": 0.0,
+            "risk_level": "MODERATE",
+            "risk_level_label": "보통",
+            "core_article_count": 0,
+            "secondary_article_count": 0,
+            "articles": [],
+            "brief_source": "rule_based",
+        }
 
 
-market_news = fetch_macro_market_news(limit=8)
-news_brief = build_news_macro_brief(market_news)
+news_brief = fetch_news_brief(lookback_days=2, max_articles=20, region="US", asset_focus="growth")
+market_news = news_brief.get("articles", []) if isinstance(news_brief, dict) else []
 
 macro_summary = summarize_macro_today(
     vix_data=vix_data,
@@ -1047,6 +1074,7 @@ macro_summary = summarize_macro_today(
     qqqm_data=qqqm_data,
     sgov_data=sgov_data,
     market_news=market_news,
+    news_brief=news_brief,
 )
 
 st.header("오늘의 거시경제 요약")
@@ -1059,24 +1087,47 @@ for line in macro_summary["bullets"]:
 st.caption(macro_summary["title"])
 st.markdown(f"**시사점**: {macro_summary['implication']}")
 
-st.subheader("📰 주요 뉴스 헤드라인")
-if market_news:
-    for item in market_news[:5]:
-        title = (item.get("title") or "").strip()
-        source = (item.get("source") or "출처 미상").strip()
-        if title:
-            st.markdown(f"- {title} ({source})")
-else:
-    st.caption("현재 뉴스 데이터를 불러오지 못해 지표 기반 요약만 표시합니다.")
+st.subheader("📰 뉴스 기반 거시경제 브리핑")
+nb = news_brief if isinstance(news_brief, dict) else {}
 
-st.subheader("👀 체크 포인트")
-watchpoints = news_brief.get("watchpoints", []) if news_brief else []
-if watchpoints:
-    for point in watchpoints[:2]:
-        st.markdown(f"- {point}")
-else:
-    st.markdown("- 장기금리와 VIX의 동반 상승 여부를 우선 점검하세요.")
-    st.markdown("- 나스닥 추세와 거래량 회복 여부를 함께 확인하세요.")
+meta_col1, meta_col2, meta_col3, meta_col4 = st.columns(4)
+meta_col1.metric("기준 시각", nb.get("as_of", "-"))
+meta_col2.metric("기사 수", f"{nb.get('article_count', 0)}건")
+meta_col3.metric("기사 수 (핵심/보조)", f"{nb.get('core_article_count', 0)} / {nb.get('secondary_article_count', 0)}")
+meta_col4.metric("리스크 수준", nb.get("risk_level_label", "보통"))
+
+engine_name = "Gemini" if nb.get("brief_source") == "gemini" else "규칙 기반"
+st.caption(f"요약 엔진: {engine_name}")
+
+st.markdown(f"**오늘의 뉴스 요약**: {nb.get('headline_summary', '뉴스 기반 요약을 생성하지 못했습니다.')}")
+
+st.markdown("**시장 시사점**")
+st.markdown(f"- {nb.get('market_implication', '시장 시사점을 계산하지 못했습니다.')}")
+
+st.markdown("**포트폴리오 관점**")
+st.markdown(f"- {nb.get('portfolio_implication', '전략 신호 중심의 보수적 운용을 유지하세요.')}")
+
+st.markdown("**자산별 관점**")
+asset_notes = nb.get("asset_implications", {}) if isinstance(nb.get("asset_implications"), dict) else {}
+st.markdown(f"- QQQM: {asset_notes.get('QQQM', '금리와 변동성 민감도를 중심으로 점검하세요.')}")
+st.markdown(f"- SCHD: {asset_notes.get('SCHD', '배당/퀄리티 방어 역할과 이익 전망 변화를 확인하세요.')}")
+st.markdown(f"- IAU: {asset_notes.get('IAU', '실질금리와 안전자산 선호 흐름을 함께 점검하세요.')}")
+st.markdown(f"- SGOV: {asset_notes.get('SGOV', '현금성 완충 자산으로 변동성 대응 여력을 유지하세요.')}")
+
+st.markdown("**체크 포인트**")
+watch_points = nb.get("watch_points", []) or ["미국 10년물 금리 방향", "VIX 재상승 여부"]
+for point in watch_points[:4]:
+    st.markdown(f"- {point}")
+
+with st.expander("수집된 대표 뉴스 보기", expanded=False):
+    if market_news:
+        for item in market_news[:5]:
+            title = (item.get("title") or "").strip()
+            source = (item.get("source") or "출처 미상").strip()
+            if title:
+                st.markdown(f"- {title} ({source})")
+    else:
+        st.caption("현재 수집된 대표 뉴스가 없습니다.")
 
 st.markdown("---")
 

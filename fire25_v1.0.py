@@ -3,6 +3,9 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+import logging
+import re
 import time
 import requests
 import xml.etree.ElementTree as ET
@@ -33,6 +36,9 @@ from fire25.monte_carlo import (
     plot_monte_carlo,
     simulate_monte_carlo_with_contributions,
 )
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def fmt_money(x):
@@ -881,17 +887,94 @@ def fetch_macro_market_metrics():
 
 def short_korean(text: str, max_sentences: int = 2) -> str:
     """Trim narrative into short dashboard-friendly Korean lines."""
-    src = (text or "").strip()
+    src = str(text or "").strip()
     if not src:
         return "데이터가 부족합니다."
-    parts = [p.strip() for p in re.split(r"[.!?]\s*", src) if p.strip()]
+    parts = [
+        p.strip()
+        for p in re.split(r"[.!?]\s*", src)
+        if p.strip()
+    ]
     if not parts:
         return src
-    return "\n".join(parts[:max_sentences])
+    return "\n".join(parts[: max(1, int(max_sentences))])
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return float(default)
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        if value is None or value == "":
+            return int(default)
+        return int(float(value))
+    except Exception:
+        return int(default)
+
+
+def detect_market_events(vix, fng, tnx, oil, brief) -> list[str]:
+    """Detect macro shock events with robust null handling."""
+    events: list[str] = []
+    vix_value = _safe_float((vix or {}).get("price"), 20.0)
+    oil_value = _safe_float((oil or {}).get("price"), 0.0)
+    tnx_chg = _safe_float((tnx or {}).get("change_pct"), 0.0)
+    fng_value = _safe_int((fng or {}).get("value"), 50)
+    nb = brief if isinstance(brief, dict) else {}
+    drivers = nb.get("macro_drivers", [])
+    if not isinstance(drivers, list):
+        drivers = []
+    dom_categories = nb.get("dominant_categories", [])
+    if not isinstance(dom_categories, list):
+        dom_categories = []
+
+    if vix_value > 30:
+        events.append("VIX 상승 - 변동성 확대")
+    if oil_value > 100:
+        events.append("유가 급등 - 에너지 리스크")
+    if "GEOPOLITICAL_CONFLICT" in dom_categories or any("지정학" in str(x) for x in drivers):
+        events.append("지정학 충격 - 리스크오프 경계")
+    if tnx_chg > 2.0:
+        events.append("장기금리 급등 - 밸류에이션 압박")
+    if fng_value <= 20:
+        events.append("심리 급랭 - 공포 구간 진입")
+    return events
+
+
+def build_risk_radar(vix, fng, brief) -> dict[str, int]:
+    """Build stable macro risk radar even with missing data."""
+    vix_value = _safe_float((vix or {}).get("price"), 20.0)
+    fng_value = _safe_int((fng or {}).get("value"), 50)
+    nb = brief if isinstance(brief, dict) else {}
+    drivers = nb.get("macro_drivers", [])
+    if not isinstance(drivers, list):
+        drivers = []
+    dom_categories = nb.get("dominant_categories", [])
+    if not isinstance(dom_categories, list):
+        dom_categories = []
+
+    geo_hint = any("지정학" in str(x) for x in drivers) or ("GEOPOLITICAL_CONFLICT" in dom_categories)
+    infl_hint = ("INFLATION_PRESSURE" in dom_categories) or ("ENERGY_SUPPLY_RISK" in dom_categories)
+
+    radar = defaultdict(int)
+    radar["금리 리스크"] = min(100, max(0, int(vix_value * 2.2)))
+    radar["인플레이션 리스크"] = min(100, 75 if infl_hint else 45)
+    radar["지정학 리스크"] = 80 if geo_hint else 35
+    radar["시장 스트레스"] = min(100, max(0, int((100 - fng_value) * 1.2)))
+    return dict(radar)
 
 
 news_brief = fetch_news_brief(lookback_days=2, max_articles=20, region="US", asset_focus="growth")
+if not isinstance(news_brief, dict):
+    news_brief = {}
 market_news = news_brief.get("articles", []) if isinstance(news_brief, dict) else []
+if not isinstance(market_news, list):
+    market_news = []
 macro_summary = summarize_macro_today(
     vix_data=vix_data,
     fng_data=fng_data,
@@ -900,11 +983,22 @@ macro_summary = summarize_macro_today(
     market_news=market_news,
     news_brief=news_brief,
 )
+if not isinstance(macro_summary, dict):
+    macro_summary = {}
 regime_info = detect_market_regime(
     qqqm_data["df"],
     vix_data["price"] if vix_data else None,
 )
+if not isinstance(regime_info, dict):
+    regime_info = {}
 tnx_data, oil_data = fetch_macro_market_metrics()
+if not isinstance(tnx_data, dict):
+    tnx_data = {}
+if not isinstance(oil_data, dict):
+    oil_data = {}
+
+LOGGER.debug("news_brief keys: %s", list(news_brief.keys()))
+LOGGER.debug("macro_summary keys: %s", list(macro_summary.keys()))
 
 # Strategy/risk signals reused across tabs.
 defcon_triggered = detect_defcon(vix_data["price"] if vix_data else None, qqqm_data.get("rsi"))
@@ -972,14 +1066,23 @@ with tab1:
 with tab2:
     st.header("시장 현황")
 
+    vix_val = _safe_float((vix_data or {}).get('price'), 20.0)
+    vix_chg = _safe_float((vix_data or {}).get('change_pct'), 0.0)
+    fng_val = _safe_int((fng_data or {}).get('value'), 50)
+    tnx_val = _safe_float((tnx_data or {}).get('price'), 0.0)
+    tnx_chg = _safe_float((tnx_data or {}).get('change_pct'), 0.0)
+    oil_val = _safe_float((oil_data or {}).get('price'), 0.0)
+    oil_chg = _safe_float((oil_data or {}).get('change_pct'), 0.0)
+
     mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-    mcol1.metric("VIX", f"{(vix_data or {}).get('price', 0.0):.2f}", f"{(vix_data or {}).get('change_pct', 0.0):+.2f}%")
-    mcol2.metric("Fear & Greed", f"{(fng_data or {}).get('value', 50)}")
-    mcol3.metric("미국 10Y 금리", f"{(tnx_data or {}).get('price', 0.0):.2f}%", f"{(tnx_data or {}).get('change_pct', 0.0):+.2f}%")
-    mcol4.metric("유가(WTI)", f"${(oil_data or {}).get('price', 0.0):.2f}", f"{(oil_data or {}).get('change_pct', 0.0):+.2f}%")
+    mcol1.metric("VIX", f"{vix_val:.2f}", f"{vix_chg:+.2f}%")
+    mcol2.metric("Fear & Greed", f"{fng_val}")
+    mcol3.metric("미국 10Y 금리", f"{tnx_val:.2f}%", f"{tnx_chg:+.2f}%")
+    mcol4.metric("유가(WTI)", f"${oil_val:.2f}", f"{oil_chg:+.2f}%")
 
     regime_raw = regime_info.get("regime", "CORRECTION")
-    st.markdown(f"**시장 국면**: `{regime_raw}` | 신뢰도 `{float(regime_info.get('confidence', 0.0)) * 100:.1f}%`")
+    regime_conf = _safe_float(regime_info.get('confidence', 0.0), 0.0)
+    st.markdown(f"**시장 국면**: `{regime_raw}` | 신뢰도 `{regime_conf * 100:.1f}%`")
 
     t1, t2, t3, t4 = st.columns(4)
     t1.metric("RSI", f"{qqqm_data.get('rsi', 50.0):.1f}")
@@ -1024,19 +1127,7 @@ with tab3:
     st.caption(short_korean(macro_summary.get("implication", ""), max_sentences=1))
 
     st.subheader("2 MARKET SHOCK ALERT")
-    shock_events = []
-    vix_price = float((vix_data or {}).get("price", 0.0))
-    oil_price = float((oil_data or {}).get("price", 0.0))
-    drivers = nb.get("macro_drivers", []) if isinstance(nb.get("macro_drivers", []), list) else []
-    dom_categories = nb.get("dominant_categories", []) if isinstance(nb.get("dominant_categories", []), list) else []
-    if vix_price > 30:
-        shock_events.append("VIX 상승 - 변동성 확대")
-    if oil_price > 100:
-        shock_events.append("유가 급등 - 에너지 리스크")
-    if "GEOPOLITICAL_CONFLICT" in dom_categories or any("지정학" in str(x) for x in drivers):
-        shock_events.append("지정학 충격 - 리스크오프 경계")
-    if float((tnx_data or {}).get("change_pct", 0.0)) > 2.0:
-        shock_events.append("장기금리 급등 - 밸류에이션 압박")
+    shock_events = detect_market_events(vix_data, fng_data, tnx_data, oil_data, nb)
 
     if shock_events:
         st.warning("⚠ MARKET EVENT\n" + "\n".join([f"- {x}" for x in shock_events[:3]]))
@@ -1044,28 +1135,29 @@ with tab3:
         st.success("현재 대형 매크로 충격 신호는 제한적입니다.")
 
     st.subheader("3 MACRO DASHBOARD")
+    vix_price = _safe_float((vix_data or {}).get("price"), 20.0)
+    oil_price = _safe_float((oil_data or {}).get("price"), 0.0)
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("VIX", f"{vix_price:.2f}")
-    k2.metric("Fear & Greed", f"{(fng_data or {}).get('value', 50)}")
-    k3.metric("10Y Treasury", f"{float((tnx_data or {}).get('price', 0.0)):.2f}%")
+    k2.metric("Fear & Greed", f"{_safe_int((fng_data or {}).get('value'), 50)}")
+    k3.metric("10Y Treasury", f"{_safe_float((tnx_data or {}).get('price'), 0.0):.2f}%")
     k4.metric("Oil", f"${oil_price:.2f}")
 
     st.subheader("4 RISK RADAR")
-    fng_val = int((fng_data or {}).get("value", 50))
-    rate_risk = min(100, int(max(0.0, vix_price * 2.2)))
-    infl_risk = min(100, int(max(0.0, oil_price * 0.8)))
-    geo_risk = 80 if any("지정학" in str(x) for x in drivers) else 35
-    stress_risk = min(100, int(max(0.0, (100 - fng_val) * 1.2)))
+    radar = build_risk_radar(vix_data, fng_data, nb)
     st.write("금리 리스크")
-    st.progress(rate_risk)
+    st.progress(_safe_int(radar.get("금리 리스크"), 40))
     st.write("인플레이션 리스크")
-    st.progress(infl_risk)
+    st.progress(_safe_int(radar.get("인플레이션 리스크"), 40))
     st.write("지정학 리스크")
-    st.progress(geo_risk)
+    st.progress(_safe_int(radar.get("지정학 리스크"), 35))
     st.write("시장 스트레스")
-    st.progress(stress_risk)
+    st.progress(_safe_int(radar.get("시장 스트레스"), 40))
 
     st.subheader("5 TOP MARKET DRIVERS")
+    drivers = nb.get("macro_drivers", [])
+    if not isinstance(drivers, list):
+        drivers = []
     label_map = {
         "POLICY_RATE_RISK": "금리 경로 리스크",
         "YIELD_PRESSURE": "장기금리 압력",
@@ -1078,8 +1170,11 @@ with tab3:
         "MARKET_STRESS": "시장 스트레스",
     }
     top_cats = (nb.get("dominant_categories", []) or ["OTHER"])[:3]
-    for i, cat in enumerate(top_cats, start=1):
-        st.markdown(f"{i}️⃣ {label_map.get(cat, '기타 이슈')}")
+    if top_cats:
+        for i, cat in enumerate(top_cats, start=1):
+            st.markdown(f"{i}️⃣ {label_map.get(cat, '기타 이슈')}")
+    else:
+        st.info("현재 주요 거시 동인이 없습니다.")
 
     st.subheader("6 MARKET INTERPRETATION")
     st.markdown(short_korean(nb.get("market_implication", "시장 방향은 아직 불확실합니다. 금리 흐름 확인이 필요합니다."), max_sentences=2))
@@ -1095,12 +1190,18 @@ with tab3:
     st.dataframe(impact_df, width='stretch', hide_index=True)
 
     st.subheader("8 WATCH POINTS")
-    for wp in (nb.get("watch_points", []) or ["미국 10년물 금리", "VIX 방향", "유가 100달러 유지 여부"])[:4]:
+    watch_points = nb.get("watch_points", [])
+    if not isinstance(watch_points, list):
+        watch_points = []
+    for wp in (watch_points or ["미국 10년물 금리", "VIX 방향", "유가 100달러 유지 여부"])[:4]:
         st.markdown(f"- {wp}")
 
     st.subheader("9 NEWS SIGNAL")
     st.markdown(short_korean(nb.get("headline_summary", "뉴스 요약 데이터가 부족합니다."), max_sentences=2))
     st.caption(f"요약 엔진: {'Gemini' if nb.get('brief_source') == 'gemini' else '규칙 기반'}")
+
+    if not market_news:
+        st.warning("데이터를 불러오는 중입니다.")
 
 
 # Legacy long-form rendering is kept below for reference but disabled.

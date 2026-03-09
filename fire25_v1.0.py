@@ -832,7 +832,282 @@ with st.sidebar:
     st.caption(f"환율 기준: 1 USD = {fx_krw_per_usd:,.2f} KRW")
 
 # =====================================================================
-# Main dashboard real-time quotes
+# Main dashboard (Decision-first terminal)
+# =====================================================================
+
+@st.cache_data(ttl=1800)
+def fetch_news_brief(lookback_days=2, max_articles=20, region="US", asset_focus="growth"):
+    """뉴스 기반 거시 브리핑 캐시 fetch."""
+    try:
+        return get_news_brief(
+            lookback_days=lookback_days,
+            max_articles=max_articles,
+            region=region,
+            asset_focus=asset_focus,
+        )
+    except Exception:
+        return {
+            "status": "fallback",
+            "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "article_count": 0,
+            "headline_summary": "뉴스 데이터를 불러오지 못해 지표 기반 요약을 우선 표시합니다.",
+            "macro_drivers": [],
+            "market_implication": "시장 방향은 아직 불확실합니다. 금리 흐름 확인이 필요합니다.",
+            "portfolio_implication": "방어 비중을 유지하고 신호 확인 후 분할 접근이 유효합니다.",
+            "asset_implications": {
+                "QQQM": "성장주 변동성 확대 가능성을 점검하세요.",
+                "SCHD": "배당 방어 역할을 확인하세요.",
+                "IAU": "지정학 리스크 헤지 흐름을 확인하세요.",
+                "SGOV": "현금 대기 전략 유효성을 점검하세요.",
+            },
+            "watch_points": ["미국 10년물 금리", "VIX 방향"],
+            "sentiment_score": 0.0,
+            "risk_level": "MODERATE",
+            "risk_level_label": "보통",
+            "core_article_count": 0,
+            "secondary_article_count": 0,
+            "articles": [],
+            "brief_source": "rule_based",
+        }
+
+
+@st.cache_data(ttl=900)
+def fetch_macro_market_metrics():
+    """Fetch 10Y treasury and oil as macro dashboard inputs."""
+    tnx = get_market_data("^TNX", period="1mo")
+    oil = get_market_data("CL=F", period="1mo")
+    return tnx, oil
+
+
+def short_korean(text: str, max_sentences: int = 2) -> str:
+    """Trim narrative into short dashboard-friendly Korean lines."""
+    src = (text or "").strip()
+    if not src:
+        return "데이터가 부족합니다."
+    parts = [p.strip() for p in re.split(r"[.!?]\s*", src) if p.strip()]
+    if not parts:
+        return src
+    return "\n".join(parts[:max_sentences])
+
+
+news_brief = fetch_news_brief(lookback_days=2, max_articles=20, region="US", asset_focus="growth")
+market_news = news_brief.get("articles", []) if isinstance(news_brief, dict) else []
+macro_summary = summarize_macro_today(
+    vix_data=vix_data,
+    fng_data=fng_data,
+    qqqm_data=qqqm_data,
+    sgov_data=sgov_data,
+    market_news=market_news,
+    news_brief=news_brief,
+)
+regime_info = detect_market_regime(
+    qqqm_data["df"],
+    vix_data["price"] if vix_data else None,
+)
+tnx_data, oil_data = fetch_macro_market_metrics()
+
+# Strategy/risk signals reused across tabs.
+defcon_triggered = detect_defcon(vix_data["price"] if vix_data else None, qqqm_data.get("rsi"))
+puddle_result = calculate_puddle_signal(qqqm_data["df"], cooldown_days=30)
+puddle_stage = puddle_result.stage
+shoulder_eval = evaluate_smart_shoulder(qqqm_data['df'], qqqm_pct)
+smart_shoulder_triggered = bool(shoulder_eval['triggered'])
+
+tab1, tab2, tab3 = st.tabs([
+    "내 자산 현황",
+    "시장 현황",
+    "거시경제 & 전략"
+])
+
+with tab1:
+    st.header("내 자산 현황")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("총 자산", f"${total_value:,.2f}")
+    c2.metric("QQQM", f"{qqqm_pct:.1f}%")
+    c3.metric("SCHD", f"{schd_pct:.1f}%")
+    c4.metric("IAU", f"{iau_pct:.1f}%")
+    c5.metric("현금", f"{cash_pct:.1f}%")
+
+    asset_table = pd.DataFrame({
+        "자산": ["QQQM", "SCHD", "IAU", "SGOV", "예수금", "현금 합계"],
+        "평가금": [qqqm_value, schd_value, iau_value, sgov_value, cash_deposit, total_cash],
+        "비중(%)": [qqqm_pct, schd_pct, iau_pct, sgov_pct, deposit_pct, cash_pct],
+        "목표 비중(%)": [72.0, 16.0, 2.0, None, None, 10.0],
+    })
+    st.dataframe(
+        asset_table.style.format({"평가금": "${:,.2f}", "비중(%)": "{:.2f}", "목표 비중(%)": "{:.2f}"}),
+        width='stretch',
+        hide_index=True,
+    )
+
+    fig_alloc = go.Figure(data=[go.Pie(
+        labels=['QQQM', 'SCHD', 'IAU', 'SGOV', '예수금'],
+        values=[qqqm_value, schd_value, iau_value, sgov_value, cash_deposit],
+        hole=0.45,
+        marker=dict(colors=['#10b981', '#3b82f6', '#fbbf24', '#94a3b8', '#64748b']),
+        textinfo='label+percent'
+    )])
+    fig_alloc.update_layout(
+        height=360,
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e2e8f0'),
+        margin=dict(l=20, r=20, t=20, b=20),
+    )
+    st.plotly_chart(fig_alloc, width='stretch', config={'displayModeBar': False})
+
+    with st.expander("FIRE 확률 (간이)", expanded=False):
+        hist_returns = pd.to_numeric(qqqm_data["df"]["Close"], errors="coerce").pct_change().dropna().values
+        if len(hist_returns) > 10:
+            sim_paths = simulate_monte_carlo_with_contributions(
+                returns=hist_returns,
+                years=20,
+                simulations=400,
+                initial_capital=float(max(total_value, 10000.0)),
+                annual_investment=12000.0,
+            )
+            fire_prob = calculate_fire_probability(sim_paths, target_value=1000000.0)
+            st.metric("FIRE 달성 확률", f"{fire_prob * 100:.1f}%")
+
+with tab2:
+    st.header("시장 현황")
+
+    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+    mcol1.metric("VIX", f"{(vix_data or {}).get('price', 0.0):.2f}", f"{(vix_data or {}).get('change_pct', 0.0):+.2f}%")
+    mcol2.metric("Fear & Greed", f"{(fng_data or {}).get('value', 50)}")
+    mcol3.metric("미국 10Y 금리", f"{(tnx_data or {}).get('price', 0.0):.2f}%", f"{(tnx_data or {}).get('change_pct', 0.0):+.2f}%")
+    mcol4.metric("유가(WTI)", f"${(oil_data or {}).get('price', 0.0):.2f}", f"{(oil_data or {}).get('change_pct', 0.0):+.2f}%")
+
+    regime_raw = regime_info.get("regime", "CORRECTION")
+    st.markdown(f"**시장 국면**: `{regime_raw}` | 신뢰도 `{float(regime_info.get('confidence', 0.0)) * 100:.1f}%`")
+
+    t1, t2, t3, t4 = st.columns(4)
+    t1.metric("RSI", f"{qqqm_data.get('rsi', 50.0):.1f}")
+    t2.metric("SMA50", f"${qqqm_data.get('sma_50', 0.0):.2f}")
+    t3.metric("SMA100", f"${qqqm_data.get('sma_100', 0.0):.2f}")
+    t4.metric("SMA200", f"${qqqm_data.get('sma_200', 0.0):.2f}")
+
+    fig_px = go.Figure()
+    fig_px.add_trace(go.Candlestick(
+        x=qqqm_data['df'].index,
+        open=qqqm_data['df']['Open'],
+        high=qqqm_data['df']['High'],
+        low=qqqm_data['df']['Low'],
+        close=qqqm_data['df']['Close'],
+        name='QQQM',
+        increasing_line_color='#ef4444',
+        decreasing_line_color='#3b82f6',
+    ))
+    fig_px.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['SMA_50'], name='SMA50', line=dict(color='#3b82f6')))
+    fig_px.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['SMA_100'], name='SMA100', line=dict(color='#f97316')))
+    fig_px.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['SMA_200'], name='SMA200', line=dict(color='#ef4444')))
+    fig_px.update_layout(height=420, plot_bgcolor='rgba(30,41,59,0.5)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#e2e8f0'))
+    st.plotly_chart(fig_px, width='stretch', config={'displayModeBar': False})
+
+with tab3:
+    st.header("거시경제 & 전략")
+    nb = news_brief if isinstance(news_brief, dict) else {}
+
+    st.subheader("1 TODAY'S STRATEGY")
+    risk_label = nb.get("risk_level_label", "보통")
+    if risk_label == "높음":
+        stance = "🛡 방어 우위"
+        action = "💰 분할 매수 대기"
+    elif risk_label == "낮음":
+        stance = "✅ 위험선호"
+        action = "📈 추세 점진 추종"
+    else:
+        stance = "⚖ 중립"
+        action = "💰 신호 확인 후 분할 대응"
+    st.markdown(f"**{stance}**  ")
+    st.markdown(f"**{action}**")
+    st.caption(short_korean(macro_summary.get("implication", ""), max_sentences=1))
+
+    st.subheader("2 MARKET SHOCK ALERT")
+    shock_events = []
+    vix_price = float((vix_data or {}).get("price", 0.0))
+    oil_price = float((oil_data or {}).get("price", 0.0))
+    drivers = nb.get("macro_drivers", []) if isinstance(nb.get("macro_drivers", []), list) else []
+    dom_categories = nb.get("dominant_categories", []) if isinstance(nb.get("dominant_categories", []), list) else []
+    if vix_price > 30:
+        shock_events.append("VIX 상승 - 변동성 확대")
+    if oil_price > 100:
+        shock_events.append("유가 급등 - 에너지 리스크")
+    if "GEOPOLITICAL_CONFLICT" in dom_categories or any("지정학" in str(x) for x in drivers):
+        shock_events.append("지정학 충격 - 리스크오프 경계")
+    if float((tnx_data or {}).get("change_pct", 0.0)) > 2.0:
+        shock_events.append("장기금리 급등 - 밸류에이션 압박")
+
+    if shock_events:
+        st.warning("⚠ MARKET EVENT\n" + "\n".join([f"- {x}" for x in shock_events[:3]]))
+    else:
+        st.success("현재 대형 매크로 충격 신호는 제한적입니다.")
+
+    st.subheader("3 MACRO DASHBOARD")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("VIX", f"{vix_price:.2f}")
+    k2.metric("Fear & Greed", f"{(fng_data or {}).get('value', 50)}")
+    k3.metric("10Y Treasury", f"{float((tnx_data or {}).get('price', 0.0)):.2f}%")
+    k4.metric("Oil", f"${oil_price:.2f}")
+
+    st.subheader("4 RISK RADAR")
+    fng_val = int((fng_data or {}).get("value", 50))
+    rate_risk = min(100, int(max(0.0, vix_price * 2.2)))
+    infl_risk = min(100, int(max(0.0, oil_price * 0.8)))
+    geo_risk = 80 if any("지정학" in str(x) for x in drivers) else 35
+    stress_risk = min(100, int(max(0.0, (100 - fng_val) * 1.2)))
+    st.write("금리 리스크")
+    st.progress(rate_risk)
+    st.write("인플레이션 리스크")
+    st.progress(infl_risk)
+    st.write("지정학 리스크")
+    st.progress(geo_risk)
+    st.write("시장 스트레스")
+    st.progress(stress_risk)
+
+    st.subheader("5 TOP MARKET DRIVERS")
+    label_map = {
+        "POLICY_RATE_RISK": "금리 경로 리스크",
+        "YIELD_PRESSURE": "장기금리 압력",
+        "INFLATION_PRESSURE": "인플레이션 압력",
+        "LABOR_SOFTNESS": "고용 둔화",
+        "GROWTH_SLOWDOWN": "성장 둔화",
+        "TECH_AI_SUPPORT": "AI/기술 모멘텀",
+        "GEOPOLITICAL_CONFLICT": "지정학 갈등",
+        "ENERGY_SUPPLY_RISK": "에너지 공급 리스크",
+        "MARKET_STRESS": "시장 스트레스",
+    }
+    top_cats = (nb.get("dominant_categories", []) or ["OTHER"])[:3]
+    for i, cat in enumerate(top_cats, start=1):
+        st.markdown(f"{i}️⃣ {label_map.get(cat, '기타 이슈')}")
+
+    st.subheader("6 MARKET INTERPRETATION")
+    st.markdown(short_korean(nb.get("market_implication", "시장 방향은 아직 불확실합니다. 금리 흐름 확인이 필요합니다."), max_sentences=2))
+
+    st.subheader("7 PORTFOLIO IMPACT")
+    asset_imp = nb.get("asset_implications", {}) if isinstance(nb.get("asset_implications"), dict) else {}
+    impact_df = pd.DataFrame([
+        {"자산": "QQQM", "관점": short_korean(asset_imp.get("QQQM", "성장주 변동성 확대 가능성을 점검하세요."), 1)},
+        {"자산": "SCHD", "관점": short_korean(asset_imp.get("SCHD", "배당 방어 역할을 확인하세요."), 1)},
+        {"자산": "IAU", "관점": short_korean(asset_imp.get("IAU", "지정학 리스크 헤지 흐름을 확인하세요."), 1)},
+        {"자산": "SGOV", "관점": short_korean(asset_imp.get("SGOV", "현금 대기 전략 유효성을 점검하세요."), 1)},
+    ])
+    st.dataframe(impact_df, width='stretch', hide_index=True)
+
+    st.subheader("8 WATCH POINTS")
+    for wp in (nb.get("watch_points", []) or ["미국 10년물 금리", "VIX 방향", "유가 100달러 유지 여부"])[:4]:
+        st.markdown(f"- {wp}")
+
+    st.subheader("9 NEWS SIGNAL")
+    st.markdown(short_korean(nb.get("headline_summary", "뉴스 요약 데이터가 부족합니다."), max_sentences=2))
+    st.caption(f"요약 엔진: {'Gemini' if nb.get('brief_source') == 'gemini' else '규칙 기반'}")
+
+
+# Legacy long-form rendering is kept below for reference but disabled.
+st.stop()
+
+# =====================================================================
+# Main dashboard real-time quotes (legacy)
 st.header("실시간 시세")
 
 col1, col2, col3, col4 = st.columns(4)

@@ -60,9 +60,11 @@ DEFAULT_QUERIES = [
     "market volatility VIX",
     "US recession outlook",
     "geopolitics market impact",
-    "middle east conflict oil market",
+    "middle east conflict oil",
     "iran israel war oil",
-    "energy supply disruption markets",
+    "energy supply disruption",
+    "bond yield spike",
+    "global inflation outlook",
     "shipping disruption oil markets",
 ]
 

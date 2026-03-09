@@ -47,6 +47,7 @@ SOURCE_NAME_HINTS = {
     "yahoo finance": "finance.yahoo.com",
     "associated press": "apnews.com",
     "ap news": "apnews.com",
+    " ap ": "apnews.com",
     "barron's": "barrons.com",
     "barrons": "barrons.com",
 }
@@ -62,6 +63,7 @@ DEFAULT_QUERIES = [
     "middle east conflict oil market",
     "iran israel war oil",
     "energy supply disruption markets",
+    "shipping disruption oil markets",
 ]
 
 DIRECT_TRUSTED_RSS = [
@@ -191,9 +193,9 @@ def _fallback_output(message: str = "뉴스 데이터 수집 실패") -> dict:
         "dominant_bigrams": [],
         "raw_article_count": 0,
         "normalized_article_count": 0,
-        "dropped_untrusted_count": 0,
         "matched_core_count": 0,
         "matched_secondary_count": 0,
+        "matched_unknown_count": 0,
         "articles": [],
         "brief_source": "rule_based",
     }
@@ -915,9 +917,9 @@ def get_news_brief(lookback_days=2, max_articles=20, region="US", asset_focus="g
             "dominant_bigrams": theme_info.get("dominant_bigrams", []),
             "raw_article_count": len(raw_articles),
             "normalized_article_count": len(normalized),
-            "dropped_untrusted_count": 0,
             "matched_core_count": sum(1 for a in normalized if a.get("source_tier") == "core"),
             "matched_secondary_count": sum(1 for a in normalized if a.get("source_tier") == "secondary"),
+            "matched_unknown_count": sum(1 for a in normalized if a.get("source_tier") == "unknown"),
             "core_article_count": aggregated.get("core_article_count", 0),
             "secondary_article_count": aggregated.get("secondary_article_count", 0),
             "articles": enriched,

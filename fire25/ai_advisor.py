@@ -17,16 +17,32 @@ AI_PROMPT_TEMPLATE = """
 
 출력은 반드시 JSON만 반환하세요.
 스키마:
-{
-  "market_view": "",
-  "shield_alert": "",
-  "dip_signal": "",
-  "action": ""
-}
+{{
+    "market_view": "",
+    "shield_alert": "",
+    "dip_signal": "",
+    "action": ""
+}}
 
 입력 컨텍스트:
 {context_json}
 """.strip()
+
+
+PROMPT_ERROR_FALLBACK = {
+        "market_view": "AI 분석을 생성하지 못했습니다.",
+        "shield_alert": "프롬프트 오류",
+        "dip_signal": "확인 필요",
+        "action": "설정을 점검하세요.",
+}
+
+
+GENERAL_FALLBACK = {
+        "market_view": "시장 데이터는 혼조입니다. 핵심 지표 확인이 필요합니다.",
+        "shield_alert": "방어 신호는 중립입니다. 변동성 급등 여부를 점검하세요.",
+        "dip_signal": "웅줍 신호는 보조 지표와 함께 확인하세요.",
+        "action": "현금 비중과 목표 비중을 유지하며 단계적으로 대응하세요.",
+}
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -116,25 +132,35 @@ def parse_ai_output(text: str) -> dict | None:
     return result
 
 
+def _build_prompt(context: dict) -> str:
+    """Build model prompt safely without crashing on formatting issues."""
+    try:
+        context_json = json.dumps(context or {}, ensure_ascii=False)
+        return AI_PROMPT_TEMPLATE.format(context_json=context_json)
+    except Exception as exc:
+        raise ValueError("prompt_generation_error") from exc
+
+
 def generate_ai_analysis(
     context: dict,
     api_key: str,
     model: str = "gpt-4.1-mini",
     timeout: float = 20.0,
-) -> dict | None:
+) -> tuple[dict | None, str | None]:
     """Call OpenAI and return parsed structured analysis."""
     if not str(api_key or "").strip():
-        return None
+        return None, "missing_api_key"
 
     try:
         from openai import OpenAI
     except Exception:
-        return None
+        return None, "missing_openai_sdk"
 
     client = OpenAI(api_key=api_key)
-    prompt = AI_PROMPT_TEMPLATE.format(
-        context_json=json.dumps(context, ensure_ascii=False)
-    )
+    try:
+        prompt = _build_prompt(context)
+    except Exception:
+        return None, "prompt_generation_error"
 
     try:
         response = client.responses.create(
@@ -150,7 +176,7 @@ def generate_ai_analysis(
             timeout=timeout,
         )
     except Exception:
-        return None
+        return None, "api_error"
 
     text = ""
     try:
@@ -158,7 +184,10 @@ def generate_ai_analysis(
     except Exception:
         text = ""
 
-    return parse_ai_output(text)
+    parsed = parse_ai_output(text)
+    if not parsed:
+        return None, "parse_error"
+    return parsed, None
 
 
 def get_ai_advice(
@@ -167,21 +196,20 @@ def get_ai_advice(
     model: str = "gpt-4.1-mini",
 ) -> dict:
     """Main entry: returns robust, always-usable advice payload."""
-    fallback = {
-        "market_view": "시장 데이터는 혼조입니다. 핵심 지표 확인이 필요합니다.",
-        "shield_alert": "방어 신호는 중립입니다. 변동성 급등 여부를 점검하세요.",
-        "dip_signal": "웅줍 신호는 보조 지표와 함께 확인하세요.",
-        "action": "현금 비중과 목표 비중을 유지하며 단계적으로 대응하세요.",
-    }
+    try:
+        parsed, error_code = generate_ai_analysis(context=context, api_key=api_key, model=model)
+        if error_code == "prompt_generation_error":
+            return dict(PROMPT_ERROR_FALLBACK)
 
-    parsed = generate_ai_analysis(context=context, api_key=api_key, model=model)
-    if not parsed:
-        return fallback
+        if not parsed:
+            return dict(GENERAL_FALLBACK)
 
-    result = {
-        "market_view": parsed.get("market_view") or fallback["market_view"],
-        "shield_alert": parsed.get("shield_alert") or fallback["shield_alert"],
-        "dip_signal": parsed.get("dip_signal") or fallback["dip_signal"],
-        "action": parsed.get("action") or fallback["action"],
-    }
-    return result
+        return {
+            "market_view": parsed.get("market_view") or GENERAL_FALLBACK["market_view"],
+            "shield_alert": parsed.get("shield_alert") or GENERAL_FALLBACK["shield_alert"],
+            "dip_signal": parsed.get("dip_signal") or GENERAL_FALLBACK["dip_signal"],
+            "action": parsed.get("action") or GENERAL_FALLBACK["action"],
+        }
+    except Exception:
+        # Never let AI layer crash Streamlit dashboard.
+        return dict(PROMPT_ERROR_FALLBACK)

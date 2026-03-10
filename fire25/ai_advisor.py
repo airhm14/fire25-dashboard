@@ -148,11 +148,9 @@ def parse_ai_output(text: str) -> dict | None:
         "dip_signal": str(parsed.get("dip_signal", "")).strip(),
         "action": str(parsed.get("action", "")).strip(),
     }
-
     if not any(result.values()):
         return None
     return result
-
 
 def _build_prompt(context: dict) -> str:
     """Build model prompt safely without crashing on formatting issues."""
@@ -209,18 +207,14 @@ def generate_ai_analysis(
         text = ""
 
     response_id = getattr(response, "id", None)
-    response_model = getattr(response, "model", None)
     usage = getattr(response, "usage", None)
-    input_tokens = getattr(usage, "input_tokens", None) if usage is not None else None
-    output_tokens = getattr(usage, "output_tokens", None) if usage is not None else None
     total_tokens = getattr(usage, "total_tokens", None) if usage is not None else None
 
-    print("AI RESPONSE ID:", response_id)
-    print("AI RESPONSE MODEL:", response_model)
-    print("AI RESPONSE USAGE:", usage)
-    print("AI RESPONSE INPUT TOKENS:", input_tokens)
-    print("AI RESPONSE OUTPUT TOKENS:", output_tokens)
-    print("AI RESPONSE TOTAL TOKENS:", total_tokens)
+    print("OPENAI RESPONSE ID:", response_id)
+    if hasattr(response, "usage") and response.usage is not None:
+        print("INPUT TOKENS:", response.usage.input_tokens)
+        print("OUTPUT TOKENS:", response.usage.output_tokens)
+        print("TOTAL TOKENS:", response.usage.total_tokens)
 
     print("AI RAW RESPONSE:", text)
 

@@ -156,7 +156,10 @@ def generate_ai_analysis(
     except Exception:
         return None, "missing_openai_sdk"
 
-    client = OpenAI(api_key=api_key)
+    try:
+        client = OpenAI(api_key=api_key)
+    except Exception:
+        return None, "api_error"
     try:
         prompt = _build_prompt(context)
     except Exception:
@@ -199,17 +202,29 @@ def get_ai_advice(
     try:
         parsed, error_code = generate_ai_analysis(context=context, api_key=api_key, model=model)
         if error_code == "prompt_generation_error":
-            return dict(PROMPT_ERROR_FALLBACK)
+            out = dict(PROMPT_ERROR_FALLBACK)
+            out["_ai_source"] = "fallback"
+            out["_debug_error"] = "prompt_generation_error"
+            return out
 
         if not parsed:
-            return dict(GENERAL_FALLBACK)
+            out = dict(GENERAL_FALLBACK)
+            out["_ai_source"] = "fallback"
+            out["_debug_error"] = error_code
+            return out
 
-        return {
+        out = {
             "market_view": parsed.get("market_view") or GENERAL_FALLBACK["market_view"],
             "shield_alert": parsed.get("shield_alert") or GENERAL_FALLBACK["shield_alert"],
             "dip_signal": parsed.get("dip_signal") or GENERAL_FALLBACK["dip_signal"],
             "action": parsed.get("action") or GENERAL_FALLBACK["action"],
+            "_ai_source": "openai",
+            "_debug_error": None,
         }
+        return out
     except Exception:
         # Never let AI layer crash Streamlit dashboard.
-        return dict(PROMPT_ERROR_FALLBACK)
+        out = dict(PROMPT_ERROR_FALLBACK)
+        out["_ai_source"] = "fallback"
+        out["_debug_error"] = "unexpected_exception"
+        return out

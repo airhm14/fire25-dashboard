@@ -1232,17 +1232,26 @@ with tab3:
         )
 
         advice = get_ai_advice(context=context, api_key=api_key)
+        ai_source = str(advice.get("_ai_source", "fallback"))
+        debug_error = advice.get("_debug_error", None)
+
+        if ai_source == "openai":
+            st.caption("AI 상태: OpenAI 응답")
+        else:
+            st.caption("AI 상태: fallback 응답")
+            if debug_error:
+                st.caption(f"디버그: {debug_error}")
 
         a1, a2 = st.columns(2)
         with a1:
-            st.markdown("**Market View**")
+            st.markdown("**오늘 시장 해석**")
             st.info(advice.get("market_view", "데이터가 부족합니다."))
-            st.markdown("**Shield Alert**")
+            st.markdown("**Shield 경보**")
             st.warning(advice.get("shield_alert", "데이터가 부족합니다."))
         with a2:
-            st.markdown("**Dip Signal**")
+            st.markdown("**웅줍 신호**")
             st.info(advice.get("dip_signal", "데이터가 부족합니다."))
-            st.markdown("**Suggested Action**")
+            st.markdown("**다음 액션**")
             st.success(advice.get("action", "데이터가 부족합니다."))
 
     if not market_news:

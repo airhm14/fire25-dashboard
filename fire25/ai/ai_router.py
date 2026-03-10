@@ -114,6 +114,11 @@ def run_all(
         openai_result["_ai_source"] = "fallback"
         openai_result["_debug_error"] = "router_exception"
 
+    # Attach resolved model names for UI display
+    gemini_result["_model"] = _gemini_model
+    claude_result["_model"] = _claude_model
+    openai_result["_model"] = _openai_model
+
     return {
         "gemini": gemini_result,
         "claude": claude_result,

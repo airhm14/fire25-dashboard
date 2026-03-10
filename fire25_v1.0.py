@@ -1870,7 +1870,7 @@ with tab3:
             <div style="display:flex;align-items:center;margin-bottom:12px;">
                 <span style="font-size:1.3em;margin-right:8px;">💎</span>
                 <span style="color:#60a5fa;font-weight:700;font-size:1.1em;">Gemini 이벤트 브리프</span>
-                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{gf['source']}</span>
+                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{gf['source']} · {ai_results['gemini'].get('_model','')}</span>
             </div>
             <p style="color:#e2e8f0;margin:0;line-height:1.6;">{gf['headline']}</p>
         </div>""", unsafe_allow_html=True)
@@ -1884,7 +1884,7 @@ with tab3:
             <div style="display:flex;align-items:center;margin-bottom:12px;">
                 <span style="font-size:1.3em;margin-right:8px;">🔮</span>
                 <span style="color:#c084fc;font-weight:700;font-size:1.1em;">Claude 거시 해석</span>
-                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{cf['source']}</span>
+                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{cf['source']} · {ai_results['claude'].get('_model','')}</span>
             </div>
             <p style="color:#e2e8f0;margin:0 0 8px;line-height:1.6;">{cf['macro_view']}</p>
             <p style="color:#f87171;font-size:0.9em;margin:4px 0;">⚠ 핵심 리스크: {cf['key_risk']}</p>
@@ -1900,7 +1900,7 @@ with tab3:
             <div style="display:flex;align-items:center;margin-bottom:12px;">
                 <span style="font-size:1.3em;margin-right:8px;">🧠</span>
                 <span style="color:#34d399;font-weight:700;font-size:1.1em;">OpenAI 오늘의 전략</span>
-                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{of['source']}</span>
+                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{of['source']} · {ai_results['openai'].get('_model','')}</span>
             </div>
         </div>""", unsafe_allow_html=True)
 
@@ -1943,9 +1943,9 @@ with tab3:
         _c_dot, _c_msg = _status_dot(cf.get("_source"), cf.get("_debug_error"))
         _o_dot, _o_msg = _status_dot(of.get("_source"), of.get("_debug_error"))
         with st.expander("AI 상태 진단", expanded=False):
-            st.markdown(f"{_g_dot} **Gemini** — {_g_msg}")
-            st.markdown(f"{_c_dot} **Claude** — {_c_msg}")
-            st.markdown(f"{_o_dot} **OpenAI** — {_o_msg}")
+            st.markdown(f"{_g_dot} **Gemini** (`{ai_results['gemini'].get('_model','')}`) — {_g_msg}")
+            st.markdown(f"{_c_dot} **Claude** (`{ai_results['claude'].get('_model','')}`) — {_c_msg}")
+            st.markdown(f"{_o_dot} **OpenAI** (`{ai_results['openai'].get('_model','')}`) — {_o_msg}")
             st.caption("🟢 정상 | 🟡 fallback (키 없음/SDK 없음) | 🔴 오류")
 
     st.markdown("---")

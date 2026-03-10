@@ -52,6 +52,25 @@ CLAUDE_FALLBACK: dict[str, str] = {
 }
 
 
+def _polish_korean_sentence(text: str) -> str:
+    """Clean up a Korean sentence for dashboard display."""
+    s = str(text or "").strip()
+    if not s:
+        return s
+    # collapse multiple whitespace
+    s = re.sub(r"[ \t]+", " ", s)
+    # remove stray newlines
+    s = re.sub(r"\n+", " ", s)
+    # ensure trailing period
+    if s and s[-1] not in ".!?。":
+        s += "."
+    # limit length (≈ 200 chars)
+    if len(s) > 200:
+        cut = s[:197].rsplit(" ", 1)[0] or s[:197]
+        s = cut.rstrip(".,") + "…"
+    return s
+
+
 def _build_prompt(context: dict) -> str:
     ctx_json = json.dumps(context or {}, ensure_ascii=False)
     return CLAUDE_PROMPT_TEMPLATE.format(context_json=ctx_json)
@@ -138,10 +157,14 @@ def interpret_macro(
         return {**CLAUDE_FALLBACK, **out_meta, "_debug_error": "parse_error"}
 
     result = {
-        "macro_view": str(parsed.get("macro_view", "")).strip() or CLAUDE_FALLBACK["macro_view"],
-        "key_risk": str(parsed.get("key_risk", "")).strip() or CLAUDE_FALLBACK["key_risk"],
-        "opportunity": str(parsed.get("opportunity", "")).strip() or CLAUDE_FALLBACK["opportunity"],
-        "watch_point": str(parsed.get("watch_point", "")).strip() or CLAUDE_FALLBACK["watch_point"],
+        "macro_view": _polish_korean_sentence(
+            parsed.get("macro_view", "")) or CLAUDE_FALLBACK["macro_view"],
+        "key_risk": _polish_korean_sentence(
+            parsed.get("key_risk", "")) or CLAUDE_FALLBACK["key_risk"],
+        "opportunity": _polish_korean_sentence(
+            parsed.get("opportunity", "")) or CLAUDE_FALLBACK["opportunity"],
+        "watch_point": _polish_korean_sentence(
+            parsed.get("watch_point", "")) or CLAUDE_FALLBACK["watch_point"],
         "_source": "claude",
         "_debug_error": None,
     }

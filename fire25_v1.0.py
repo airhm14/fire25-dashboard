@@ -1701,51 +1701,23 @@ with tab2:
                 st.caption(f"  {n['title'][:60]}")
 
 # =====================================================================
-# TAB 3 — 거시경제 & 전략 (Multi-AI Orchestration)
+# TAB 3 — 거시경제 & 전략 (2-Layer: Facts + AI Orchestration)
 # =====================================================================
 with tab3:
     st.header("거시경제 & 전략")
     nb = news_brief if isinstance(news_brief, dict) else {}
 
-    # ── 1 TODAY'S STRATEGY ──
-    st.subheader("1 TODAY'S STRATEGY")
-    _risk_label = nb.get("risk_level_label", "보통")
-    if _risk_label == "높음":
-        _stance, _act = "🛡 방어 우위", "💰 분할 매수 대기"
-    elif _risk_label == "낮음":
-        _stance, _act = "✅ 위험선호", "📈 추세 점진 추종"
-    else:
-        _stance, _act = "⚖ 중립", "💰 신호 확인 후 분할 대응"
-    st.markdown(f"**{_stance}** — {_act}")
-    st.caption(short_korean(macro_summary.get("implication", ""), max_sentences=1))
+    # =================================================================
+    # A. 정보 레이어 — 엔진이 계산한 사실/원자료만 표시
+    #    ※ 이 레이어에서 전략 제안 문장을 쓰지 않는다.
+    # =================================================================
+    st.markdown("""<p style='color:#64748b; font-size:0.85em; letter-spacing:0.05em;
+        margin-bottom:4px;'>📊 <b>정보 레이어</b> — 엔진이 계산한 사실 데이터</p>""",
+        unsafe_allow_html=True)
 
-    # ── 2 MARKET SHOCK ALERT ──
-    st.subheader("2 MARKET SHOCK ALERT")
+    # ── 1. 시장 이벤트 ──
+    st.subheader("① 시장 이벤트")
     shock_events = detect_market_events(vix_data, fng_data, tnx_data, oil_data, nb)
-    if shock_events:
-        st.warning("⚠ MARKET EVENT\n" + "\n".join([f"- {x}" for x in shock_events[:3]]))
-    else:
-        st.success("현재 대형 매크로 충격 신호는 제한적입니다.")
-
-    # ── 3 MACRO DASHBOARD ──
-    st.subheader("3 MACRO DASHBOARD")
-    _vix_p = _safe_float((vix_data or {}).get("price"), 20.0)
-    _oil_p = _safe_float((oil_data or {}).get("price"), 0.0)
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("VIX", f"{_vix_p:.2f}")
-    k2.metric("Fear & Greed", f"{_safe_int((fng_data or {}).get('value'), 50)}")
-    k3.metric("10Y Treasury", f"{_safe_float((tnx_data or {}).get('price'), 0.0):.2f}%")
-    k4.metric("Oil", f"${_oil_p:.2f}")
-
-    # ── 4 RISK RADAR ──
-    st.subheader("4 RISK RADAR")
-    radar = build_risk_radar(vix_data, fng_data, nb)
-    for rname in ["금리 리스크", "인플레이션 리스크", "지정학 리스크", "시장 스트레스"]:
-        st.write(rname)
-        st.progress(_safe_int(radar.get(rname), 40))
-
-    # ── 5 TOP MARKET DRIVERS ──
-    st.subheader("5 TOP MARKET DRIVERS")
     _label_map = {
         "POLICY_RATE_RISK": "금리 경로 리스크",
         "YIELD_PRESSURE": "장기금리 압력",
@@ -1757,60 +1729,107 @@ with tab3:
         "ENERGY_SUPPLY_RISK": "에너지 공급 리스크",
         "MARKET_STRESS": "시장 스트레스",
     }
-    _top_cats = (nb.get("dominant_categories", []) or ["OTHER"])[:3]
-    for i, cat in enumerate(_top_cats, start=1):
-        st.markdown(f"{i}️⃣ {_label_map.get(cat, '기타 이슈')}")
+    _top_cats = (nb.get("dominant_categories", []) or [])[:3]
+    _event_items = [_label_map.get(c, c) for c in _top_cats]
+    for ev in (shock_events or [])[:3]:
+        if ev not in _event_items:
+            _event_items.append(ev)
+    if _event_items:
+        _bullets = "".join(
+            f"<li style='margin:4px 0;color:#e2e8f0;'>{e}</li>"
+            for e in _event_items[:4]
+        )
+        st.markdown(f"""
+        <div style="background:#1e293b;border-left:4px solid #f59e0b;border-radius:8px;padding:16px;">
+            <ul style="margin:0;padding-left:20px;">{_bullets}</ul>
+        </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="background:#1e293b;border-left:4px solid #10b981;border-radius:8px;padding:16px;">
+            <p style="color:#10b981;margin:0;">현재 주요 시장 이벤트가 감지되지 않았습니다.</p>
+        </div>""", unsafe_allow_html=True)
 
-    # ── 6 MARKET INTERPRETATION ──
-    st.subheader("6 MARKET INTERPRETATION")
-    st.markdown(short_korean(nb.get("market_implication", "시장 방향은 아직 불확실합니다."), max_sentences=2))
+    # ── 2. 리스크 레이더 ──
+    st.subheader("② 리스크 레이더")
+    radar = build_risk_radar(vix_data, fng_data, nb)
+    _risk_cols = st.columns(4)
+    _risk_names = ["금리 리스크", "인플레이션 리스크", "지정학 리스크", "시장 스트레스"]
+    _risk_icons = ["📈", "🔥", "🌍", "⚡"]
+    for _ri, (_rn, _ric) in enumerate(zip(_risk_names, _risk_icons)):
+        with _risk_cols[_ri]:
+            _rv = min(100, max(0, _safe_int(radar.get(_rn), 40)))
+            _rc = "#ef4444" if _rv >= 70 else ("#f59e0b" if _rv >= 50 else "#10b981")
+            st.markdown(f"""
+            <div style="background:#1e293b;border-radius:8px;padding:12px;text-align:center;">
+                <p style="font-size:1.2em;margin:0;">{_ric}</p>
+                <p style="color:#94a3b8;font-size:0.8em;margin:4px 0;">{_rn}</p>
+                <p style="color:{_rc};font-size:1.5em;font-weight:700;margin:0;">{_rv}</p>
+            </div>""", unsafe_allow_html=True)
+            st.progress(_rv / 100)
 
-    # ── 7 PORTFOLIO IMPACT ──
-    st.subheader("7 PORTFOLIO IMPACT")
-    _aimp = nb.get("asset_implications", {}) if isinstance(nb.get("asset_implications"), dict) else {}
-    impact_df = pd.DataFrame([
-        {"자산": "QQQM", "관점": short_korean(_aimp.get("QQQM", "성장주 변동성 확대 가능성을 점검하세요."), 1)},
-        {"자산": "SCHD", "관점": short_korean(_aimp.get("SCHD", "배당 방어 역할을 확인하세요."), 1)},
-        {"자산": "IAU", "관점": short_korean(_aimp.get("IAU", "지정학 리스크 헤지 흐름을 확인하세요."), 1)},
-        {"자산": "SGOV", "관점": short_korean(_aimp.get("SGOV", "현금 대기 전략 유효성을 점검하세요."), 1)},
-    ])
-    st.dataframe(impact_df, width='stretch', hide_index=True)
+    # ── 3. 시장 레짐 / 핵심 지표 ──
+    st.subheader("③ 시장 레짐 / 핵심 지표")
+    _regime_label_map = {
+        "BULL": "🟢 상승장", "CORRECTION": "🟡 조정장",
+        "BEAR": "🔴 하락장", "RECOVERY": "🔵 회복장",
+    }
+    _regime_color_map = {
+        "BULL": "#10b981", "CORRECTION": "#f59e0b",
+        "BEAR": "#ef4444", "RECOVERY": "#3b82f6",
+    }
+    _regime_raw = regime_info.get("regime", "CORRECTION")
+    _r_label = _regime_label_map.get(_regime_raw, "🟡 조정장")
+    _r_color = _regime_color_map.get(_regime_raw, "#f59e0b")
+    st.markdown(f"""
+    <div style="background:#1e293b;border:2px solid {_r_color};border-radius:8px;
+                padding:10px 16px;display:inline-block;margin-bottom:12px;">
+        <span style="color:{_r_color};font-weight:700;font-size:1.1em;">{_r_label}</span>
+    </div>""", unsafe_allow_html=True)
 
-    # ── 8 WATCH POINTS ──
-    st.subheader("8 WATCH POINTS")
-    _wp = nb.get("watch_points", [])
-    if not isinstance(_wp, list):
-        _wp = []
-    for wp in (_wp or ["미국 10년물 금리", "VIX 방향", "유가 100달러 유지 여부"])[:4]:
-        st.markdown(f"- {wp}")
-
-    # ── 9 NEWS SIGNAL ──
-    st.subheader("9 NEWS SIGNAL")
-    st.markdown(short_korean(nb.get("headline_summary", "뉴스 요약 데이터가 부족합니다."), max_sentences=2))
-    st.caption(f"요약 엔진: {'Gemini' if nb.get('brief_source') == 'gemini' else '규칙 기반'}")
+    _vix_p = _safe_float((vix_data or {}).get("price"), 20.0)
+    _fng_v = _safe_int((fng_data or {}).get("value"), 50)
+    _tny_p = _safe_float((tnx_data or {}).get("price"), 0.0)
+    _oil_p = _safe_float((oil_data or {}).get("price"), 0.0)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("VIX", f"{_vix_p:.2f}")
+    k2.metric("Fear & Greed", f"{_fng_v}")
+    k3.metric("10Y 금리", f"{_tny_p:.2f}%")
+    k4.metric("유가", f"${_oil_p:.2f}")
 
     st.markdown("---")
 
-    # ── Multi-AI Orchestration ──
-    st.subheader("AI 전략 오케스트레이션")
-    st.caption("Gemini (이벤트 탐지) → Claude (거시 해석) → OpenAI (전략 어드바이저)")
+    # =================================================================
+    # B. AI 오케스트레이션 레이어 — 사실을 요약/해석/전략으로 연결
+    #    ※ 각 AI는 자기 역할만 수행한다 (중복 금지).
+    #      Gemini → 이벤트 요약 | Claude → 거시 해석 | OpenAI → 전략 제안
+    # =================================================================
+    st.markdown("""<p style='color:#64748b; font-size:0.85em; letter-spacing:0.05em;
+        margin-bottom:4px;'>🤖 <b>AI 오케스트레이션 레이어</b> — Gemini · Claude · OpenAI</p>""",
+        unsafe_allow_html=True)
 
     if st.button("AI 분석 실행", width='stretch', key="ai_orch"):
         openai_key = st.secrets.get("OPENAI_API_KEY", "")
         claude_key = st.secrets.get("ANTHROPIC_API_KEY", "")
 
-        # Build decision context
         from fire25.ai.decision_context_builder import build_decision_context
         from fire25.ai.ai_router import run_all as ai_run_all
-        from fire25.ai.ai_formatter import format_gemini_section, format_claude_section, format_openai_section
+        from fire25.ai.ai_formatter import (
+            format_gemini_section, format_claude_section, format_openai_section,
+        )
 
         _qqqm_sma200 = _safe_float(qqqm_data.get("sma_200"), 0.0)
         _qqqm_price = _safe_float(qqqm_data.get("price"), 0.0)
-        _sma200_gap = ((_qqqm_price - _qqqm_sma200) / _qqqm_sma200 * 100.0) if _qqqm_sma200 > 0 else 0.0
+        _sma200_gap = (
+            (_qqqm_price - _qqqm_sma200) / _qqqm_sma200 * 100.0
+            if _qqqm_sma200 > 0 else 0.0
+        )
         _cash_level = "높음" if cash_pct >= 15 else ("중간" if cash_pct >= 8 else "낮음")
 
         decision_ctx = build_decision_context(
-            portfolio_weight={"QQQM": round(qqqm_pct, 2), "SCHD": round(schd_pct, 2), "IAU": round(iau_pct, 2), "SGOV+현금": round(cash_pct, 2)},
+            portfolio_weight={
+                "QQQM": round(qqqm_pct, 2), "SCHD": round(schd_pct, 2),
+                "IAU": round(iau_pct, 2), "SGOV+현금": round(cash_pct, 2),
+            },
             target_weight={"QQQM": 72.0, "SCHD": 16.0, "IAU": 2.0, "SGOV+현금": 10.0},
             cash_level=_cash_level,
             vix=_safe_float((vix_data or {}).get("price"), 20.0),
@@ -1838,59 +1857,108 @@ with tab3:
                 claude_api_key=claude_key,
             )
 
-        # ── Gemini events ──
-        st.markdown("---")
-        st.markdown("##### Gemini 이벤트 탐지")
+        # ── 4. Gemini 이벤트 브리프 ──
+        # 역할: 오늘 무슨 일이 있었는가? (이벤트 요약만, 해석 최소화)
         gf = format_gemini_section(ai_results["gemini"])
-        st.markdown(f"**헤드라인**: {gf['headline']}")
-        st.markdown(f"**시장 시사점**: {gf['implication']}")
-        st.caption(f"리스크: {gf['risk_label']} | 소스: {gf['source']}")
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
+                    border:1px solid #3b82f6;border-radius:12px;padding:20px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;margin-bottom:12px;">
+                <span style="font-size:1.3em;margin-right:8px;">💎</span>
+                <span style="color:#60a5fa;font-weight:700;font-size:1.1em;">Gemini 이벤트 브리프</span>
+                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{gf['source']}</span>
+            </div>
+            <p style="color:#e2e8f0;margin:0;line-height:1.6;">{gf['headline']}</p>
+        </div>""", unsafe_allow_html=True)
 
-        # ── Claude macro ──
-        st.markdown("---")
-        st.markdown("##### Claude 거시 해석")
+        # ── 5. Claude 거시 해석 ──
+        # 역할: 그 일이 시장에 어떤 의미가 있는가? (거시 해석만, 전략 금지)
         cf = format_claude_section(ai_results["claude"])
-        st.info(f"**거시 관점**: {cf['macro_view']}")
-        st.markdown(f"- **핵심 리스크**: {cf['key_risk']}")
-        st.markdown(f"- **기회 요인**: {cf['opportunity']}")
-        st.markdown(f"- **주시점**: {cf['watch_point']}")
-        st.caption(f"소스: {cf['source']}")
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
+                    border:1px solid #a855f7;border-radius:12px;padding:20px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;margin-bottom:12px;">
+                <span style="font-size:1.3em;margin-right:8px;">🔮</span>
+                <span style="color:#c084fc;font-weight:700;font-size:1.1em;">Claude 거시 해석</span>
+                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{cf['source']}</span>
+            </div>
+            <p style="color:#e2e8f0;margin:0 0 8px;line-height:1.6;">{cf['macro_view']}</p>
+            <p style="color:#f87171;font-size:0.9em;margin:4px 0;">⚠ 핵심 리스크: {cf['key_risk']}</p>
+            <p style="color:#34d399;font-size:0.9em;margin:4px 0;">💡 기회 요인: {cf['opportunity']}</p>
+        </div>""", unsafe_allow_html=True)
 
-        # ── OpenAI strategy ──
-        st.markdown("---")
-        st.markdown("##### OpenAI 전략 어드바이저")
+        # ── 6. OpenAI 오늘의 전략 ──
+        # 역할: 그래서 지금 어떻게 대응할까? (전략의 최종 요약자)
         of = format_openai_section(ai_results["openai"])
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
+                    border:1px solid #10b981;border-radius:12px;padding:20px;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;margin-bottom:12px;">
+                <span style="font-size:1.3em;margin-right:8px;">🧠</span>
+                <span style="color:#34d399;font-weight:700;font-size:1.1em;">OpenAI 오늘의 전략</span>
+                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{of['source']}</span>
+            </div>
+        </div>""", unsafe_allow_html=True)
 
         d1, d2, d3 = st.columns(3)
-        d1.metric("Dip Probability", f"{of['dip_probability']}%")
-        d2.metric("Risk Level", of['risk_level'])
-        d3.metric("AI Confidence", of['confidence'])
+        d1.metric("하락 확률", f"{of['dip_probability']}%")
+        d2.metric("리스크", of['risk_level'])
+        d3.metric("신뢰도", of['confidence'])
 
         a1, a2 = st.columns(2)
         with a1:
-            st.markdown("**오늘 시장 해석**")
-            st.info(of.get("market_view", "데이터 부족"))
-            st.markdown("**Shield 경보**")
-            st.warning(of.get("shield_alert", "데이터 부족"))
+            st.markdown(f"""
+            <div style="background:#1e293b;border-radius:8px;padding:12px;margin-bottom:8px;">
+                <p style="color:#94a3b8;font-size:0.8em;margin:0 0 4px;">오늘의 시장</p>
+                <p style="color:#e2e8f0;margin:0;">{of.get('market_view','데이터 부족')}</p>
+            </div>
+            <div style="background:#1e293b;border-radius:8px;padding:12px;">
+                <p style="color:#f59e0b;font-size:0.8em;margin:0 0 4px;">Shield 경보</p>
+                <p style="color:#e2e8f0;margin:0;">{of.get('shield_alert','데이터 부족')}</p>
+            </div>""", unsafe_allow_html=True)
         with a2:
-            st.markdown("**웅줍 신호**")
-            st.info(of.get("dip_signal", "데이터 부족"))
-            st.markdown("**다음 액션**")
-            st.success(of.get("action", "데이터 부족"))
-        st.caption(f"소스: {of['source']}")
+            st.markdown(f"""
+            <div style="background:#1e293b;border-radius:8px;padding:12px;margin-bottom:8px;">
+                <p style="color:#3b82f6;font-size:0.8em;margin:0 0 4px;">웅줍 신호</p>
+                <p style="color:#e2e8f0;margin:0;">{of.get('dip_signal','데이터 부족')}</p>
+            </div>
+            <div style="background:#1e293b;border-radius:8px;padding:12px;">
+                <p style="color:#10b981;font-size:0.8em;margin:0 0 4px;">다음 액션</p>
+                <p style="color:#e2e8f0;margin:0;">{of.get('action','데이터 부족')}</p>
+            </div>""", unsafe_allow_html=True)
 
-    # ── News articles ──
-    with st.expander("수집된 대표 뉴스 보기", expanded=False):
+    st.markdown("---")
+
+    # ── 7. 포트폴리오 관점 (엔진 원자료) ──
+    st.subheader("⑦ 포트폴리오 관점")
+    _aimp = nb.get("asset_implications", {}) if isinstance(nb.get("asset_implications"), dict) else {}
+    _impact_rows = [
+        {"자산": "QQQM", "관점": short_korean(_aimp.get("QQQM", "확인 필요"), 1)},
+        {"자산": "SCHD", "관점": short_korean(_aimp.get("SCHD", "확인 필요"), 1)},
+        {"자산": "IAU", "관점": short_korean(_aimp.get("IAU", "확인 필요"), 1)},
+        {"자산": "SGOV", "관점": short_korean(_aimp.get("SGOV", "확인 필요"), 1)},
+    ]
+    st.dataframe(pd.DataFrame(_impact_rows), width='stretch', hide_index=True)
+
+    # ── 8. 체크 포인트 ──
+    st.subheader("⑧ 체크 포인트")
+    _wp = nb.get("watch_points", [])
+    if not isinstance(_wp, list):
+        _wp = []
+    for wp in (_wp or ["미국 10년물 금리", "VIX 방향", "유가 흐름"])[:4]:
+        st.markdown(f"- {wp}")
+
+    # ── 9. 대표 뉴스 보기 ──
+    with st.expander("⑨ 대표 뉴스 보기", expanded=False):
         if market_news:
-            for item in market_news[:5]:
-                title = (item.get("title") or "").strip()
-                source = (item.get("source") or "출처 미상").strip()
-                if title:
-                    st.markdown(f"- {title} ({source})")
+            for _ni in market_news[:5]:
+                _nt = (_ni.get("title") or "").strip()
+                _ns = (_ni.get("source") or "출처 미상").strip()
+                if _nt:
+                    st.markdown(f"- **{_nt}** ({_ns})")
         else:
-            st.caption("현재 수집된 대표 뉴스가 없습니다.")
+            st.caption("수집된 뉴스가 없습니다.")
 
-# =====================================================================
 # Footer
 # =====================================================================
 st.markdown("---")

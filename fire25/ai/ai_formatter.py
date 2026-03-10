@@ -18,11 +18,12 @@ def short_korean(text: str, max_sentences: int = 2) -> str:
 
 
 def format_gemini_section(gemini: dict) -> dict:
-    """Return display-ready strings from Gemini event output."""
+    """Return display-ready strings from Gemini event output.
+
+    Gemini 역할: 이벤트 요약만 (해석은 Claude 영역).
+    """
     return {
         "headline": short_korean(gemini.get("headline_summary", ""), 2),
-        "implication": short_korean(gemini.get("market_implication", ""), 2),
-        "risk_label": gemini.get("risk_level_label", "보통"),
         "drivers": gemini.get("macro_drivers", []),
         "source": "Gemini" if gemini.get("brief_source") == "gemini" else "규칙 기반",
     }

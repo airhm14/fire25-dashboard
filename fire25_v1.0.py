@@ -1008,14 +1008,24 @@ puddle_stage = puddle_result.stage
 shoulder_eval = evaluate_smart_shoulder(qqqm_data['df'], qqqm_pct)
 smart_shoulder_triggered = bool(shoulder_eval['triggered'])
 
+puddle_alert = puddle_result.alert
+puddle_cooldown_active = puddle_result.cooldown_active
+cooldown_info = puddle_result.cooldown_info or ""
+rebalancing_needed = bool(shoulder_eval.get('rebalancing_needed'))
+
 tab1, tab2, tab3 = st.tabs([
     "내 자산 현황",
     "시장 현황",
-    "거시경제 & 전략"
+    "거시경제 & 전략",
 ])
 
+# =====================================================================
+# TAB 1 — 내 자산 현황
+# =====================================================================
 with tab1:
     st.header("내 자산 현황")
+
+    # ── Portfolio summary metrics ──
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("총 자산", f"${total_value:,.2f}")
     c2.metric("QQQM", f"{qqqm_pct:.1f}%")
@@ -1023,143 +1033,720 @@ with tab1:
     c4.metric("IAU", f"{iau_pct:.1f}%")
     c5.metric("현금", f"{cash_pct:.1f}%")
 
+    # ── Daily P&L (estimated) ──
+    portfolio_change = (
+        (qqqm_data['change_pct'] * 0.72)
+        + (schd_data['change_pct'] * 0.16)
+        + (iau_data['change_pct'] * 0.02)
+    )
+    portfolio_daily_change = total_value * (portfolio_change / 100)
+    port_color = "#ef4444" if portfolio_change >= 0 else "#3b82f6"
+    port_icon = "📈" if portfolio_change >= 0 else "📉"
+
+    pc1, pc2 = st.columns(2)
+    with pc1:
+        st.markdown(f"""
+        <div style="background:#1e293b; border:2px solid {port_color}; border-radius:12px; padding:18px; text-align:center;">
+            <p style="color:#cbd5e1; font-size:0.9em; margin:0 0 6px 0;">오늘 수익률</p>
+            <p style="color:{port_color}; font-size:2.2em; font-weight:800; margin:0;">{port_icon} {portfolio_change:+.2f}%</p>
+        </div>""", unsafe_allow_html=True)
+    with pc2:
+        st.markdown(f"""
+        <div style="background:#1e293b; border:2px solid {port_color}; border-radius:12px; padding:18px; text-align:center;">
+            <p style="color:#cbd5e1; font-size:0.9em; margin:0 0 6px 0;">예상 손익</p>
+            <p style="color:{port_color}; font-size:2.2em; font-weight:800; margin:0;">{'+'if portfolio_daily_change>=0 else ''}${portfolio_daily_change:,.2f}</p>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div style="background:#0f172a; border:1px solid #334155; border-radius:8px; padding:10px 14px; margin-top:12px;">
+        <p style="color:#e2e8f0; font-size:0.92em; margin:0; text-align:center;">
+            <span style="color:#10b981; font-weight:600;">QQQM</span> {qqqm_data['change_pct']:+.2f}% × 72%
+            &nbsp;|&nbsp;
+            <span style="color:#3b82f6; font-weight:600;">SCHD</span> {schd_data['change_pct']:+.2f}% × 16%
+            &nbsp;|&nbsp;
+            <span style="color:#fbbf24; font-weight:600;">IAU</span> {iau_data['change_pct']:+.2f}% × 2%
+        </p>
+    </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Asset table with target diff ──
     asset_table = pd.DataFrame({
-        "자산": ["QQQM", "SCHD", "IAU", "SGOV", "예수금", "현금 합계"],
-        "평가금": [qqqm_value, schd_value, iau_value, sgov_value, cash_deposit, total_cash],
-        "비중(%)": [qqqm_pct, schd_pct, iau_pct, sgov_pct, deposit_pct, cash_pct],
-        "목표 비중(%)": [72.0, 16.0, 2.0, None, None, 10.0],
+        'Asset': ['QQQM', 'SCHD', 'IAU', 'SGOV', '예수금', '현금 합계'],
+        'Value': [qqqm_value, schd_value, iau_value, sgov_value, cash_deposit, total_cash],
+        '현재 비중 (%)': [qqqm_pct, schd_pct, iau_pct, sgov_pct, deposit_pct, cash_pct],
+        '목표 비중 (%)': ['72.00%', '16.00%', '2.00%', '-', '-', '10.00%'],
+        '목표 대비 차이 (%p)': [
+            f'{qqqm_pct - 72:+.2f}%p',
+            f'{schd_pct - 16:+.2f}%p',
+            f'{iau_pct - 2:+.2f}%p',
+            '-', '-',
+            f'{cash_pct - 10:+.2f}%p',
+        ],
     })
+
+    def _highlight_rows(row):
+        if row['Asset'] == '현금 합계':
+            return ['background-color: rgba(59, 130, 246, 0.1)'] * len(row)
+        if row['Asset'] in ['SGOV', '예수금']:
+            return ['background-color: rgba(148, 163, 184, 0.05)'] * len(row)
+        return [''] * len(row)
+
     st.dataframe(
-        asset_table.style.format({"평가금": "${:,.2f}", "비중(%)": "{:.2f}", "목표 비중(%)": "{:.2f}"}),
-        width='stretch',
-        hide_index=True,
+        asset_table.style.format({'Value': '${:,.2f}', '현재 비중 (%)': '{:.2f}%'}).apply(_highlight_rows, axis=1),
+        width='stretch', hide_index=True,
     )
 
+    # ── Pie chart ──
     fig_alloc = go.Figure(data=[go.Pie(
         labels=['QQQM', 'SCHD', 'IAU', 'SGOV', '예수금'],
         values=[qqqm_value, schd_value, iau_value, sgov_value, cash_deposit],
         hole=0.45,
         marker=dict(colors=['#10b981', '#3b82f6', '#fbbf24', '#94a3b8', '#64748b']),
-        textinfo='label+percent'
+        textinfo='label+percent',
+        textfont=dict(size=11, color='white'),
+        textposition='inside',
     )])
     fig_alloc.update_layout(
-        height=360,
+        height=380,
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         font=dict(color='#e2e8f0'),
-        margin=dict(l=20, r=20, t=20, b=20),
+        margin=dict(l=20, r=20, t=10, b=10),
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=0, xanchor="center", x=0.5, font=dict(size=10)),
     )
     st.plotly_chart(fig_alloc, width='stretch', config={'displayModeBar': False})
 
-    with st.expander("FIRE 확률 (간이)", expanded=False):
-        hist_returns = pd.to_numeric(qqqm_data["df"]["Close"], errors="coerce").pct_change().dropna().values
-        if len(hist_returns) > 10:
-            sim_paths = simulate_monte_carlo_with_contributions(
-                returns=hist_returns,
-                years=20,
-                simulations=400,
-                initial_capital=float(max(total_value, 10000.0)),
-                annual_investment=12000.0,
-            )
-            fire_prob = calculate_fire_probability(sim_paths, target_value=1000000.0)
-            st.metric("FIRE 달성 확률", f"{fire_prob * 100:.1f}%")
+    st.markdown("---")
 
+    # ── Portfolio history ──
+    from fire25.storage.portfolio_history import render_portfolio_history
+    render_portfolio_history(gs_available, is_personal_mode)
+
+    # ── FIRE Simulator ──
+    with st.expander("FIRE 시뮬레이터", expanded=False):
+        st.caption("과거 수익률을 기반으로 미래 포트폴리오 경로를 부트스트랩하여 장기 FIRE 달성 가능성을 추정합니다.")
+
+        mc_col1, mc_col2, mc_col3 = st.columns(3)
+        with mc_col1:
+            mc_symbol = st.selectbox("시뮬레이션 종목", ["QQQM", "SPY", "VTI", "BTC-USD"], index=0, key="mc_sym")
+        with mc_col2:
+            mc_start_date = st.date_input("수익률 시작일", value=pd.Timestamp("2012-01-01").date(), key="mc_sd")
+        with mc_col3:
+            mc_years = st.slider("투자 기간 (년)", min_value=5, max_value=40, value=20, step=1, key="mc_yr")
+
+        mc_col4, mc_col5, mc_col6 = st.columns(3)
+        with mc_col4:
+            mc_initial = st.number_input("초기 자본", min_value=1000.0, value=max(total_value, 10000.0), step=1000.0, key="mc_init")
+        with mc_col5:
+            mc_annual_inv = st.number_input("연간 투자금", min_value=0.0, value=12000.0, step=1000.0, key="mc_ann")
+        with mc_col6:
+            mc_target = st.number_input("목표 FIRE 자본", min_value=10000.0, value=1000000.0, step=10000.0, key="mc_tgt")
+
+        mc_simulations = st.slider("시뮬레이션 수", min_value=200, max_value=5000, value=1000, step=100, key="mc_n")
+        mc_run = st.button("FIRE 시뮬레이션 실행", width='stretch', key="mc_btn")
+
+        if mc_run:
+            with st.spinner("몬테카를로 FIRE 시뮬레이션 실행 중..."):
+                hist_df = run_strategy_backtest(
+                    symbol=mc_symbol,
+                    start_date=str(mc_start_date),
+                    initial_cash=10000.0,
+                    cooldown_days=30,
+                    stage_rates={1: float(STAGE_DEPLOYMENT_RATES[1]), 2: float(STAGE_DEPLOYMENT_RATES[2]), 3: float(STAGE_DEPLOYMENT_RATES[3])},
+                    cash_ratio=0.10,
+                )
+                hist_returns = pd.to_numeric(hist_df["portfolio_value"], errors="coerce").pct_change().dropna().values
+
+                sim_paths = simulate_monte_carlo_with_contributions(
+                    returns=hist_returns,
+                    years=int(mc_years),
+                    simulations=int(mc_simulations),
+                    initial_capital=float(mc_initial),
+                    annual_investment=float(mc_annual_inv),
+                )
+                mc_stats = compute_monte_carlo_statistics(sim_paths, initial_capital=float(mc_initial), years=int(mc_years))
+                fire_prob = calculate_fire_probability(sim_paths, target_value=float(mc_target))
+
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            sc1.metric("최종 중앙값", f"${mc_stats['median_final_value']:,.0f}")
+            sc2.metric("5백분위", f"${mc_stats['5th_percentile']:,.0f}")
+            sc3.metric("95백분위", f"${mc_stats['95th_percentile']:,.0f}")
+            sc4.metric("FIRE 달성 확률", f"{fire_prob * 100:.1f}%")
+
+            st.plotly_chart(plot_monte_carlo(sim_paths), width='stretch', config={"displayModeBar": False})
+
+            final_values = sim_paths.iloc[-1].astype(float)
+            fig_dist = go.Figure()
+            fig_dist.add_trace(go.Histogram(x=final_values.values, nbinsx=50, marker_color="#3b82f6", opacity=0.85, name="최종 자산"))
+            fig_dist.add_vline(x=float(mc_target), line_color="#ef4444", line_dash="dash", annotation_text="FIRE 목표")
+            fig_dist.update_layout(
+                height=300,
+                xaxis=dict(title="최종 포트폴리오 가치 (USD)", gridcolor="rgba(148,163,184,0.2)"),
+                yaxis=dict(title="건수", gridcolor="rgba(148,163,184,0.2)"),
+                plot_bgcolor="rgba(30,41,59,0.5)", paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#e2e8f0"), margin=dict(l=40, r=20, t=20, b=20),
+            )
+            st.plotly_chart(fig_dist, width='stretch', config={"displayModeBar": False})
+
+# =====================================================================
+# TAB 2 — 시장 현황
+# =====================================================================
 with tab2:
     st.header("시장 현황")
 
-    vix_val = _safe_float((vix_data or {}).get('price'), 20.0)
-    vix_chg = _safe_float((vix_data or {}).get('change_pct'), 0.0)
-    fng_val = _safe_int((fng_data or {}).get('value'), 50)
-    tnx_val = _safe_float((tnx_data or {}).get('price'), 0.0)
-    tnx_chg = _safe_float((tnx_data or {}).get('change_pct'), 0.0)
-    oil_val = _safe_float((oil_data or {}).get('price'), 0.0)
-    oil_chg = _safe_float((oil_data or {}).get('change_pct'), 0.0)
+    # ── Real-time quotes ──
+    q1, q2, q3, q4 = st.columns(4)
+    with q1:
+        st.metric(label="QQQM (성장 코어)", value=f"${qqqm_data['price']:.2f}", delta=f"{qqqm_data['change_pct']:+.2f}%")
+        st.markdown(f"<p style='font-size:0.85em; color:#94a3b8;'>거래량: {qqqm_data['volume']:,.0f}</p>", unsafe_allow_html=True)
+    with q2:
+        st.metric(label="SCHD (배당 코어)", value=f"${schd_data['price']:.2f}", delta=f"{schd_data['change_pct']:+.2f}%")
+        st.markdown(f"<p style='font-size:0.85em; color:#94a3b8;'>거래량: {schd_data['volume']:,.0f}</p>", unsafe_allow_html=True)
+    with q3:
+        st.metric(label="IAU (금 ETF)", value=f"${iau_data['price']:.2f}", delta=f"{iau_data['change_pct']:+.2f}%")
+        st.markdown(f"<p style='font-size:0.85em; color:#94a3b8;'>거래량: {iau_data['volume']:,.0f}</p>", unsafe_allow_html=True)
+    with q4:
+        if sgov_data:
+            st.metric(label="SGOV (현금성 ETF)", value=f"${sgov_price:.2f}", delta=f"{sgov_data['change_pct']:+.2f}%")
+        else:
+            st.metric(label="SGOV (현금성 ETF)", value=f"${sgov_price:.2f}")
+        st.markdown(f"<p style='font-size:0.85em; color:#94a3b8;'>보유: {sgov_qty:,.2f}주</p>", unsafe_allow_html=True)
 
-    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
-    mcol1.metric("VIX", f"{vix_val:.2f}", f"{vix_chg:+.2f}%")
-    mcol2.metric("Fear & Greed", f"{fng_val}")
-    mcol3.metric("미국 10Y 금리", f"{tnx_val:.2f}%", f"{tnx_chg:+.2f}%")
-    mcol4.metric("유가(WTI)", f"${oil_val:.2f}", f"{oil_chg:+.2f}%")
+    st.markdown("<br>", unsafe_allow_html=True)
 
+    # ── VIX / Fear & Greed detailed cards ──
+    col_vix, col_fng = st.columns(2)
+
+    with col_vix:
+        if vix_data:
+            _vix_price = vix_data['price']
+            _vix_chg = vix_data['change_pct']
+            vix_color = "#10b981" if _vix_price <= 20 else ("#fbbf24" if _vix_price <= 30 else "#ef4444")
+            vix_status = "안정" if _vix_price <= 14 else ("정상" if _vix_price <= 20 else ("주의" if _vix_price <= 30 else "위험"))
+            defcon_warning = "⚠️ DEFCON 조건!" if _vix_price <= 14.0 else ""
+            st.markdown(f"""
+            <div style="background:#1e293b; border:2px solid {vix_color}; border-radius:12px; padding:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <p style="color:#94a3b8; font-size:0.9em; margin:0;">VIX (변동성 지수)</p>
+                        <p style="color:{vix_color}; font-size:2.5em; font-weight:800; margin:5px 0;">{_vix_price:.2f}</p>
+                        <p style="color:{'#ef4444' if _vix_chg > 0 else '#10b981'}; font-size:1em; margin:0;">
+                            {'📈' if _vix_chg > 0 else '📉'} {_vix_chg:+.2f}%
+                        </p>
+                    </div>
+                    <div style="text-align:right;">
+                        <p style="color:{vix_color}; font-size:1.5em; font-weight:700; margin:0;">{vix_status}</p>
+                        <p style="color:#ef4444; font-size:1em; font-weight:700; margin:5px 0;">{defcon_warning}</p>
+                    </div>
+                </div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.warning("VIX 데이터 없음")
+
+    with col_fng:
+        if fng_data:
+            _fng_val = fng_data['value']
+            if _fng_val >= 75:
+                fng_color, fng_label, fng_icon, fng_advice = "#ef4444", "극단적 탐욕", "🔴", "시장 과열 주의"
+            elif _fng_val >= 55:
+                fng_color, fng_label, fng_icon, fng_advice = "#f97316", "탐욕", "🟡", "상승 추세"
+            elif _fng_val >= 45:
+                fng_color, fng_label, fng_icon, fng_advice = "#fbbf24", "중립", "🟡", "관망세"
+            elif _fng_val >= 25:
+                fng_color, fng_label, fng_icon, fng_advice = "#3b82f6", "공포", "🔵", "매수 기회 탐색"
+            else:
+                fng_color, fng_label, fng_icon, fng_advice = "#8b5cf6", "극단적 공포", "🔴", "역추세 매수 고려"
+            prev_value = fng_data.get('previous')
+            fng_change_str = ""
+            if prev_value:
+                try:
+                    prev_val = int(prev_value)
+                    fng_change = _fng_val - prev_val
+                    fng_change_str = f"{'📈' if fng_change > 0 else '📉'} {fng_change:+d} (전일대비)"
+                except Exception:
+                    pass
+            st.markdown(f"""
+            <div style="background:#1e293b; border:2px solid {fng_color}; border-radius:12px; padding:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div>
+                        <p style="color:#94a3b8; font-size:0.9em; margin:0;">공포·탐욕 지수</p>
+                        <p style="color:{fng_color}; font-size:2.5em; font-weight:800; margin:5px 0;">{_fng_val}</p>
+                        <p style="color:#94a3b8; font-size:0.9em; margin:0;">{fng_change_str}</p>
+                    </div>
+                    <div style="text-align:right;">
+                        <p style="font-size:1.8em; margin:0;">{fng_icon}</p>
+                        <p style="color:{fng_color}; font-size:1.3em; font-weight:700; margin:5px 0;">{fng_label}</p>
+                        <p style="color:#94a3b8; font-size:0.85em; margin:0;">{fng_advice}</p>
+                    </div>
+                </div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style="background:#1e293b; border:2px solid #475569; border-radius:12px; padding:20px;">
+                <p style="color:#94a3b8; font-size:0.9em; margin:0;">공포·탐욕 지수</p>
+                <p style="color:#64748b; font-size:2.5em; font-weight:800; margin:5px 0;">N/A</p>
+                <p style="color:#475569; font-size:0.85em; margin:0;">CNN 연결 실패</p>
+            </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Market regime ──
+    regime_label_map = {"BULL": "🟢 상승장", "CORRECTION": "🟡 조정장", "BEAR": "🔴 하락장", "RECOVERY": "🔵 회복장"}
+    regime_color_map = {"BULL": "#10b981", "CORRECTION": "#f59e0b", "BEAR": "#ef4444", "RECOVERY": "#3b82f6"}
     regime_raw = regime_info.get("regime", "CORRECTION")
     regime_conf = _safe_float(regime_info.get('confidence', 0.0), 0.0)
-    st.markdown(f"**시장 국면**: `{regime_raw}` | 신뢰도 `{regime_conf * 100:.1f}%`")
+    r_label = regime_label_map.get(regime_raw, "🟡 조정장")
+    r_color = regime_color_map.get(regime_raw, "#f59e0b")
+    st.markdown(f"<span style='background:{r_color}; color:white; padding:6px 14px; border-radius:6px; font-weight:700;'>{r_label}</span>", unsafe_allow_html=True)
+    st.caption(f"신뢰도: {regime_conf * 100:.1f}%")
+    for item in regime_info.get("reason", []):
+        st.markdown(f"- {item}")
 
-    t1, t2, t3, t4 = st.columns(4)
-    t1.metric("RSI", f"{qqqm_data.get('rsi', 50.0):.1f}")
-    t2.metric("SMA50", f"${qqqm_data.get('sma_50', 0.0):.2f}")
-    t3.metric("SMA100", f"${qqqm_data.get('sma_100', 0.0):.2f}")
-    t4.metric("SMA200", f"${qqqm_data.get('sma_200', 0.0):.2f}")
+    st.markdown("---")
 
-    fig_px = go.Figure()
-    fig_px.add_trace(go.Candlestick(
+    # ── Strategy condition cards (DEFCON / Puddle / Smart Shoulder) ──
+    st.subheader("전략 조건 분석")
+
+    if defcon_triggered:
+        st.markdown(f"""
+        <div class="warning-box">
+            <div class="warning-title">⚠️ DEFCON 세이빙 발동</div>
+            <p><strong>VIX:</strong> {vix_data['price']:.2f} (&le; 14.00)&nbsp;&nbsp;
+            <strong>RSI:</strong> {qqqm_data['rsi']:.2f} (&ge; 70)</p>
+            <p><strong>조치:</strong> 신규 자금 100%를 SGOV로 배분 (QQQM/SCHD/IAU 매수 차단)</p>
+        </div>""", unsafe_allow_html=True)
+
+    if puddle_alert:
+        _stage_info = {
+            1: {"name": "1단계: SMA50 하향 이탈", "color": "#fbbf24", "rate": 15},
+            2: {"name": "2단계: SMA100 하향 이탈", "color": "#f97316", "rate": 35},
+            3: {"name": "3단계: SMA200 하향 이탈", "color": "#ef4444", "rate": 50},
+            4: {"name": "4단계: SMA200 회복", "color": "#10b981", "rate": 100},
+        }
+        _si = _stage_info.get(puddle_stage, _stage_info[1])
+        _remaining_cash = sgov_value + cash_deposit
+        _injection = compute_deployment(puddle_stage, _remaining_cash)
+        st.markdown(f"""
+        <div class="warning-box" style="border-color:{_si['color']};">
+            <div class="warning-title" style="color:{_si['color']};">웅덩이 진입: {_si['name']}</div>
+            <p><strong>현재가:</strong> ${qqqm_data['price']:.2f}</p>
+            <p><strong>투입 비율:</strong> {_si['rate']}% &nbsp;|&nbsp; <strong>투입 금액:</strong> ${_injection:,.2f}</p>
+            <p style="color:#10b981; font-weight:700;">신규 자금은 목표 비중 72/16/2/10으로 즉시 배분합니다.</p>
+        </div>""", unsafe_allow_html=True)
+
+    if puddle_cooldown_active and not puddle_alert:
+        st.markdown(f"""
+        <div class="info-box">
+            <div class="warning-title">웅덩이 쿨다운 진행 중</div>
+            <p><strong>현재가:</strong> ${qqqm_data['price']:.2f} (대기)</p>
+            <p><strong>판단 근거:</strong> {cooldown_info if cooldown_info else "최근 30일 이내 신호 발생"}</p>
+            <p style="color:#fbbf24;"><strong>조치:</strong> 다음 유효 신호를 대기합니다.</p>
+        </div>""", unsafe_allow_html=True)
+
+    if rebalancing_needed and not smart_shoulder_triggered:
+        _excess = qqqm_pct - 72
+        st.info(f"QQQM 과비중 감지: {qqqm_pct:.2f}% (초과 +{_excess:.2f}%p) — Smart Shoulder 트리거 대기")
+
+    if smart_shoulder_triggered:
+        _excess = qqqm_pct - 72
+        st.error(f"Smart Shoulder 리밸런싱 발동: QQQM {qqqm_pct:.2f}% (초과 +{_excess:.2f}%p) → 72/16/2/10 복귀")
+
+    # ── RSI / SMA indicator cards ──
+    ic1, ic2, ic3 = st.columns(3)
+    with ic1:
+        _rsi = qqqm_data.get('rsi', 50.0)
+        _rc = "#ef4444" if _rsi >= 70 else ("#3b82f6" if _rsi <= 30 else "#10b981")
+        _rs = "과열" if _rsi >= 70 else ("과매도" if _rsi <= 30 else "중립")
+        st.markdown(f"""
+        <div style="text-align:center; padding:20px; background:linear-gradient(135deg,rgba(30,41,59,0.8),rgba(51,65,85,0.8)); border-radius:12px; border:2px solid {_rc};">
+            <p style="font-size:0.9em; color:#cbd5e1; margin-bottom:8px; font-weight:600;">RSI(14)</p>
+            <p style="font-size:2.5em; font-weight:700; color:{_rc}; margin:10px 0;">{_rsi:.2f}</p>
+            <p style="font-size:1.1em; color:{_rc}; font-weight:600;">{_rs}</p>
+        </div>""", unsafe_allow_html=True)
+    with ic2:
+        _sma20 = qqqm_data.get('sma_20', 0.0)
+        _sc = "#10b981" if qqqm_data['price'] > _sma20 else "#fbbf24"
+        _ss = "SMA20 상회" if qqqm_data['price'] > _sma20 else "SMA20 하회"
+        st.markdown(f"""
+        <div style="text-align:center; padding:20px; background:linear-gradient(135deg,rgba(30,41,59,0.8),rgba(51,65,85,0.8)); border-radius:12px; border:2px solid {_sc};">
+            <p style="font-size:0.9em; color:#cbd5e1; margin-bottom:8px; font-weight:600;">SMA20</p>
+            <p style="font-size:2.5em; font-weight:700; color:{_sc}; margin:10px 0;">${_sma20:.2f}</p>
+            <p style="font-size:1.1em; color:{_sc}; font-weight:600;">{_ss}</p>
+        </div>""", unsafe_allow_html=True)
+    with ic3:
+        _sma50 = qqqm_data.get('sma_50', 0.0)
+        if pd.notna(_sma50) and qqqm_data['price'] > _sma50:
+            _sc2, _ss2 = "#10b981", "SMA50 상회"
+        elif pd.notna(_sma50):
+            _sc2, _ss2 = "#ef4444", "SMA50 하회"
+        else:
+            _sc2, _ss2 = "#94a3b8", "데이터 부족"
+        _sma50_d = f"${_sma50:.2f}" if pd.notna(_sma50) else "-"
+        st.markdown(f"""
+        <div style="text-align:center; padding:20px; background:linear-gradient(135deg,rgba(30,41,59,0.8),rgba(51,65,85,0.8)); border-radius:12px; border:2px solid {_sc2};">
+            <p style="font-size:0.9em; color:#cbd5e1; margin-bottom:8px; font-weight:600;">SMA50</p>
+            <p style="font-size:2.5em; font-weight:700; color:{_sc2}; margin:10px 0;">{_sma50_d}</p>
+            <p style="font-size:1.1em; color:{_sc2}; font-weight:600;">{_ss2}</p>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    ic4, ic5, ic6 = st.columns(3)
+    with ic4:
+        _sma100 = qqqm_data.get('sma_100', 0.0)
+        if pd.notna(_sma100) and qqqm_data['price'] > _sma100:
+            _sc3, _ss3 = "#10b981", "SMA100 상회"
+        elif pd.notna(_sma100):
+            _sc3, _ss3 = "#f97316", "SMA100 하회"
+        else:
+            _sc3, _ss3 = "#94a3b8", "데이터 부족"
+        _sma100_d = f"${_sma100:.2f}" if pd.notna(_sma100) else "-"
+        st.markdown(f"""
+        <div style="text-align:center; padding:20px; background:linear-gradient(135deg,rgba(30,41,59,0.8),rgba(51,65,85,0.8)); border-radius:12px; border:2px solid {_sc3};">
+            <p style="font-size:0.9em; color:#cbd5e1; margin-bottom:8px; font-weight:600;">SMA100</p>
+            <p style="font-size:2.5em; font-weight:700; color:{_sc3}; margin:10px 0;">{_sma100_d}</p>
+            <p style="font-size:1.1em; color:{_sc3}; font-weight:600;">{_ss3}</p>
+        </div>""", unsafe_allow_html=True)
+    with ic5:
+        _sma200 = qqqm_data.get('sma_200', 0.0)
+        if pd.notna(_sma200) and qqqm_data['price'] > _sma200:
+            _sc4, _ss4 = "#10b981", "SMA200 상회"
+        elif pd.notna(_sma200):
+            _sc4, _ss4 = "#ef4444", "SMA200 하회"
+        else:
+            _sc4, _ss4 = "#94a3b8", "데이터 부족"
+        _sma200_d = f"${_sma200:.2f}" if pd.notna(_sma200) else "-"
+        st.markdown(f"""
+        <div style="text-align:center; padding:20px; background:linear-gradient(135deg,rgba(30,41,59,0.8),rgba(51,65,85,0.8)); border-radius:12px; border:2px solid {_sc4};">
+            <p style="font-size:0.9em; color:#cbd5e1; margin-bottom:8px; font-weight:600;">SMA200</p>
+            <p style="font-size:2.5em; font-weight:700; color:{_sc4}; margin:10px 0;">{_sma200_d}</p>
+            <p style="font-size:1.1em; color:{_sc4}; font-weight:600;">{_ss4}</p>
+        </div>""", unsafe_allow_html=True)
+    with ic6:
+        if puddle_stage == 0:
+            _pt, _pc, _pi = "정상", "#10b981", "OK"
+        elif puddle_stage == 1:
+            _pt, _pc, _pi = "1단계 (SMA50)", "#fbbf24", "S1"
+        elif puddle_stage == 2:
+            _pt, _pc, _pi = "2단계 (SMA100)", "#f97316", "S2"
+        elif puddle_stage == 3:
+            _pt, _pc, _pi = "3단계 (SMA200)", "#ef4444", "S3"
+        else:
+            _pt, _pc, _pi = "4단계 (회복)", "#10b981", "S4"
+        st.markdown(f"""
+        <div style="text-align:center; padding:20px; background:linear-gradient(135deg,rgba(30,41,59,0.8),rgba(51,65,85,0.8)); border-radius:12px; border:2px solid {_pc};">
+            <p style="font-size:0.9em; color:#cbd5e1; margin-bottom:8px; font-weight:600;">웅덩이 단계</p>
+            <p style="font-size:2em; font-weight:700; color:{_pc}; margin:10px 0;">{_pi}</p>
+            <p style="font-size:1.1em; color:{_pc}; font-weight:600;">{_pt}</p>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── QQQM candlestick + SMA chart ──
+    st.subheader("QQQM 기술적 분석")
+    fig_ohlc = go.Figure()
+    fig_ohlc.add_trace(go.Candlestick(
         x=qqqm_data['df'].index,
-        open=qqqm_data['df']['Open'],
-        high=qqqm_data['df']['High'],
-        low=qqqm_data['df']['Low'],
-        close=qqqm_data['df']['Close'],
-        name='QQQM',
-        increasing_line_color='#ef4444',
-        decreasing_line_color='#3b82f6',
+        open=qqqm_data['df']['Open'], high=qqqm_data['df']['High'],
+        low=qqqm_data['df']['Low'], close=qqqm_data['df']['Close'],
+        name='QQQM', increasing_line_color='#ef4444', decreasing_line_color='#3b82f6',
     ))
-    fig_px.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['SMA_50'], name='SMA50', line=dict(color='#3b82f6')))
-    fig_px.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['SMA_100'], name='SMA100', line=dict(color='#f97316')))
-    fig_px.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['SMA_200'], name='SMA200', line=dict(color='#ef4444')))
-    fig_px.update_layout(height=420, plot_bgcolor='rgba(30,41,59,0.5)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#e2e8f0'))
-    st.plotly_chart(fig_px, width='stretch', config={'displayModeBar': False})
+    fig_ohlc.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['SMA_20'], name='SMA20', line=dict(color='#fbbf24', width=1.5)))
+    fig_ohlc.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['SMA_50'], name='SMA50', line=dict(color='#3b82f6', width=2)))
+    fig_ohlc.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['SMA_100'], name='SMA100', line=dict(color='#f97316', width=2)))
+    fig_ohlc.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['SMA_200'], name='SMA200', line=dict(color='#ef4444', width=2.5)))
+    fig_ohlc.update_layout(
+        plot_bgcolor='rgba(30,41,59,0.5)', paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e2e8f0'), height=500, hovermode='x unified',
+        xaxis=dict(gridcolor='rgba(148,163,184,0.2)', showgrid=True),
+        yaxis=dict(gridcolor='rgba(148,163,184,0.2)', showgrid=True, title='현재가 (USD)'),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                    bgcolor='rgba(30,41,59,0.8)', bordercolor='#475569', borderwidth=1),
+    )
+    st.plotly_chart(fig_ohlc, width='stretch')
 
+    # ── RSI chart ──
+    fig_rsi = go.Figure()
+    fig_rsi.add_trace(go.Scatter(x=qqqm_data['df'].index, y=qqqm_data['df']['RSI'], mode='lines', name='RSI(14)', line=dict(color='#10b981', width=2)))
+    fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ef4444", annotation_text="과열(70)")
+    fig_rsi.add_hline(y=30, line_dash="dash", line_color="#3b82f6", annotation_text="과매도(30)")
+    fig_rsi.update_layout(
+        plot_bgcolor='rgba(30,41,59,0.5)', paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e2e8f0'), height=300, hovermode='x unified',
+        xaxis=dict(gridcolor='rgba(148,163,184,0.2)', showgrid=True),
+        yaxis=dict(gridcolor='rgba(148,163,184,0.2)', showgrid=True, title='RSI', range=[0, 100]),
+    )
+    st.plotly_chart(fig_rsi, width='stretch')
+
+    # ── Backtest ──
+    if backtest_enabled:
+        bt_stage_rates = {k: v for k, v in STAGE_DEPLOYMENT_RATES.items() if k in (1, 2, 3)}
+        bt_fee_bps = 1.0
+        bt_slippage_bps = 2.0
+        bt_current_vol_factor = estimate_vol_factor(qqqm_data['df'])
+        bt_result = run_backtest(
+            qqqm_data['df'][['Open', 'Close', 'SMA_50', 'SMA_100', 'SMA_200']].copy(),
+            initial_cash=10000.0, stage_rates=bt_stage_rates,
+            vol_adjust=backtest_vol_adjust, buy_only=True,
+            fee_bps=bt_fee_bps, slippage_bps=bt_slippage_bps,
+        )
+        st.markdown("---")
+        st.subheader("백테스트 (실험)")
+        st.caption("규칙: 신호는 D일 종가에 계산되고, D+1일 시가에 체결됩니다.")
+        metrics_rows = [
+            {"지표": "CAGR", "값": f"{bt_result.metrics.get('CAGR', 0.0) * 100:.2f}%"},
+            {"지표": "총 수익률", "값": f"{bt_result.metrics.get('TotalReturn', 0.0) * 100:.2f}%"},
+            {"지표": "비교군 수익률", "값": f"{bt_result.metrics.get('BenchmarkTotalReturn', 0.0) * 100:.2f}%"},
+            {"지표": "최대 낙폭(MDD)", "값": f"{bt_result.metrics.get('MDD', 0.0) * 100:.2f}%"},
+            {"지표": "샤프 지수", "값": f"{bt_result.metrics.get('Sharpe', 0.0):.2f}"},
+            {"지표": "거래 횟수", "값": f"{int(bt_result.metrics.get('NumTrades', 0))}"},
+        ]
+        st.dataframe(pd.DataFrame(metrics_rows), width='stretch', hide_index=True)
+        if not bt_result.equity_curve.empty:
+            fig_bt = go.Figure()
+            fig_bt.add_trace(go.Scatter(x=bt_result.equity_curve.index, y=bt_result.equity_curve.values, mode='lines', name='전략', line=dict(color='#10b981', width=2)))
+            if not bt_result.benchmark_curve.empty:
+                fig_bt.add_trace(go.Scatter(x=bt_result.benchmark_curve.index, y=bt_result.benchmark_curve.values, mode='lines', name='매수후보유', line=dict(color='#3b82f6', width=2, dash='dash')))
+            fig_bt.update_layout(
+                plot_bgcolor='rgba(30,41,59,0.5)', paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='#e2e8f0'), height=320, hovermode='x unified',
+                margin=dict(l=40, r=20, t=20, b=20),
+            )
+            st.plotly_chart(fig_bt, width='stretch', config={'displayModeBar': False})
+
+            if not bt_result.trades.empty:
+                st.caption(f"최근 거래 {min(20, len(bt_result.trades))}건")
+                trades_view = bt_result.trades.sort_values("exec_date", ascending=False).head(20).copy()
+                trades_view["signal_date"] = pd.to_datetime(trades_view["signal_date"]).dt.strftime("%Y-%m-%d")
+                trades_view["exec_date"] = pd.to_datetime(trades_view["exec_date"]).dt.strftime("%Y-%m-%d")
+                trades_view["action"] = trades_view["action"].map(lambda x: "매수" if x == "BUY" else str(x))
+                trades_view["planned_cash"] = trades_view["planned_cash"].map(fmt_money)
+                trades_view["fee"] = trades_view["fee"].map(fmt_money)
+                trades_view["exec_price"] = trades_view["exec_price"].map(fmt_money)
+                trades_view["shares_bought"] = trades_view["shares_bought"].map(lambda x: fmt_num(x, 2))
+                trades_view["cash_after"] = trades_view["cash_after"].map(fmt_money)
+                trades_view["shares_after"] = trades_view["shares_after"].map(lambda x: fmt_num(x, 2))
+                if "vol_factor" in trades_view.columns:
+                    trades_view["vol_factor"] = trades_view["vol_factor"].map(lambda x: fmt_num(x, 2) if x is not None else "-")
+                trades_view = trades_view.rename(columns={
+                    "signal_date": "신호일", "exec_date": "체결일", "stage": "단계",
+                    "action": "동작", "planned_cash": "계획현금", "fee": "수수료",
+                    "exec_price": "체결가", "shares_bought": "매수수량",
+                    "cash_after": "잔여현금", "shares_after": "보유수량",
+                    "vol_factor": "변동성", "reason": "판단근거",
+                })
+                display_cols = [c for c in ["신호일", "체결일", "단계", "동작", "계획현금", "수수료", "체결가", "매수수량", "보유수량", "잔여현금", "변동성", "판단근거"] if c in trades_view.columns]
+                st.dataframe(trades_view[display_cols], width='stretch', hide_index=True)
+
+    # ── Strategy Lab ──
+    with st.expander("전략 연구실", expanded=False):
+        st.caption("연구 모드: 단일 실행, 현금 비중 연구, 쿨다운 민감도, 다중 자산 검증")
+        lab_modes = ["단일 실행", "현금 비중 연구", "쿨다운 연구", "다중 자산 검증"]
+        lab_mode = st.selectbox("연구 모드", lab_modes, index=0, key="lab_mode")
+
+        lc1, lc2, lc3 = st.columns(3)
+        with lc1:
+            lab_symbol = st.selectbox("종목", ["QQQM", "SPY", "VTI", "BTC-USD"], index=0, key="lab_sym")
+        with lc2:
+            lab_start_date = st.date_input("시작일", value=pd.Timestamp("2012-01-01").date(), key="lab_sd")
+        with lc3:
+            lab_initial_cash = st.number_input("초기 자본 (USD)", min_value=1000.0, value=10000.0, step=1000.0, key="lab_cash")
+
+        lab_assets = st.multiselect("다중 자산 세트", ["QQQM", "SPY", "VTI", "BTC-USD"], default=["QQQM", "SPY", "VTI", "BTC-USD"], key="lab_assets")
+
+        ctrl1, ctrl2 = st.columns(2)
+        with ctrl1:
+            lab_cash_ratio = st.slider("현금 비중", min_value=0.05, max_value=0.30, value=0.10, step=0.01, key="lab_cr")
+        with ctrl2:
+            lab_cooldown = st.slider("쿨다운 일수", min_value=10, max_value=60, value=30, step=1, key="lab_cd")
+
+        with st.expander("단계별 투입 비율 (1/2/3)", expanded=False):
+            rc1, rc2, rc3 = st.columns(3)
+            with rc1:
+                lab_rate_1 = st.slider("1단계", 0.0, 1.0, float(STAGE_DEPLOYMENT_RATES[1]), 0.01, key="lr1")
+            with rc2:
+                lab_rate_2 = st.slider("2단계", 0.0, 1.0, float(STAGE_DEPLOYMENT_RATES[2]), 0.01, key="lr2")
+            with rc3:
+                lab_rate_3 = st.slider("3단계", 0.0, 1.0, float(STAGE_DEPLOYMENT_RATES[3]), 0.01, key="lr3")
+
+        lab_stage_rates = {1: float(lab_rate_1), 2: float(lab_rate_2), 3: float(lab_rate_3)}
+        rate_sum = lab_rate_1 + lab_rate_2 + lab_rate_3
+        if rate_sum > 1.0:
+            st.error(f"투입 비율 합계 > 1.0 (현재: {rate_sum:.2f})")
+
+        lab_run = st.button("전략 연구 실행", width='stretch', key="lab_run")
+
+        if lab_run and rate_sum <= 1.0:
+            def _run_one(symbol, cooldown_days, cash_ratio):
+                return run_strategy_backtest(
+                    symbol=symbol, start_date=str(lab_start_date),
+                    initial_cash=float(lab_initial_cash), cooldown_days=int(cooldown_days),
+                    stage_rates=lab_stage_rates, cash_ratio=float(cash_ratio),
+                )
+
+            if lab_mode == "단일 실행":
+                with st.spinner("전략 백테스트 실행 중..."):
+                    lab_df = _run_one(lab_symbol, lab_cooldown, lab_cash_ratio)
+                    lab_metrics = compute_backtest_metrics(lab_df)
+                mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+                mc1.metric("총 수익률", f"{lab_metrics['Total Return'] * 100:.2f}%")
+                mc2.metric("CAGR", f"{lab_metrics['CAGR'] * 100:.2f}%")
+                mc3.metric("MDD", f"{lab_metrics['Max Drawdown'] * 100:.2f}%")
+                mc4.metric("변동성", f"{lab_metrics['Volatility'] * 100:.2f}%")
+                mc5.metric("Sharpe", f"{lab_metrics['Sharpe Ratio']:.2f}")
+                st.plotly_chart(plot_backtest_results(lab_df), width='stretch', config={"displayModeBar": False})
+
+            elif lab_mode == "현금 비중 연구":
+                rows = []
+                with st.spinner("현금 비중 연구..."):
+                    for cr in [0.05, 0.10, 0.20, 0.30]:
+                        m = compute_backtest_metrics(_run_one(lab_symbol, lab_cooldown, cr))
+                        rows.append({"현금비중": cr, "CAGR": f"{m['CAGR']*100:.2f}%", "Sharpe": f"{m['Sharpe Ratio']:.2f}", "MDD": f"{m['Max Drawdown']*100:.2f}%"})
+                st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+
+            elif lab_mode == "쿨다운 연구":
+                rows = []
+                with st.spinner("쿨다운 민감도..."):
+                    for cd in [10, 20, 30, 40, 60]:
+                        m = compute_backtest_metrics(_run_one(lab_symbol, cd, lab_cash_ratio))
+                        rows.append({"쿨다운": cd, "CAGR": f"{m['CAGR']*100:.2f}%", "Sharpe": f"{m['Sharpe Ratio']:.2f}", "MDD": f"{m['Max Drawdown']*100:.2f}%"})
+                st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+
+            else:  # 다중 자산 검증
+                if not lab_assets:
+                    st.warning("최소 1개 자산을 선택하세요.")
+                else:
+                    rows = []
+                    with st.spinner("다중 자산 검증..."):
+                        for sym in lab_assets:
+                            m = compute_backtest_metrics(_run_one(sym, lab_cooldown, lab_cash_ratio))
+                            rows.append({"자산": sym, "CAGR": f"{m['CAGR']*100:.2f}%", "Sharpe": f"{m['Sharpe Ratio']:.2f}", "MDD": f"{m['Max Drawdown']*100:.2f}%", "전략수익": f"{m['strategy_return']*100:.2f}%"})
+                    st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+
+    # ── Execution plan ──
+    st.markdown("---")
+    st.subheader("실행 계획")
+    _status_lines = []
+    if defcon_triggered:
+        _status_lines.append("DEFCON 세이빙 발동: 신규 자금을 SGOV로만 배분")
+    if puddle_alert:
+        _deploy_base = float(sgov_value + cash_deposit)
+        _deploy_amount = compute_deployment(puddle_stage, _deploy_base)
+        _status_lines.append(f"웅덩이 단계 {puddle_stage}: 기준자금=${_deploy_base:,.2f}, 권장 투입=${_deploy_amount:,.2f}")
+    elif puddle_cooldown_active:
+        _status_lines.append(f"웅덩이 쿨다운 진행 중: {cooldown_info or '최근 30일 이내'}")
+    if smart_shoulder_triggered:
+        _status_lines.append("스마트 숄더 발동: 리밸런싱 필요")
+    if not _status_lines:
+        _status_lines.append("핵심 전략 정상 운용 중")
+    for _line in _status_lines:
+        st.markdown(f"- {_line}")
+    if new_cash > 0:
+        st.caption(f"신규 자금: ${new_cash:,.2f} | 목표 비중: 72/16/2/10")
+
+    # ── Market driver analysis ──
+    @st.cache_data(ttl=1800)
+    def get_market_summary(symbol):
+        news_list = []
+        try:
+            feed_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
+            response = requests.get(feed_url, timeout=10)
+            if response.status_code != 200:
+                return news_list
+            root = ET.fromstring(response.content)
+            for item in root.findall('.//item')[:5]:
+                title = (item.findtext('title') or '').strip()
+                if not title:
+                    continue
+                news_list.append({
+                    'title': title,
+                    'publisher': (item.findtext('source') or 'Yahoo Finance').strip(),
+                    'link': (item.findtext('link') or '#').strip(),
+                })
+        except Exception:
+            pass
+        return news_list
+
+    def _interpret_asset(symbol, name, change_pct, news_list):
+        if change_pct > 1.0:
+            direction, detail = "강한 상승", "상승 모멘텀 확대"
+        elif change_pct > 0.3:
+            direction, detail = "상승", "완만한 상승"
+        elif change_pct > -0.3:
+            direction, detail = "보합", "제한적 움직임"
+        elif change_pct > -1.0:
+            direction, detail = "하락", "완만한 하락"
+        else:
+            direction, detail = "강한 하락", "하방 압력 확대"
+        return {'direction': direction, 'detail': detail, 'news': (news_list or [])[:2]}
+
+    with st.expander("오늘의 시장 동인", expanded=False):
+        with st.spinner('시장 동인 분석 중...'):
+            qqqm_news = get_market_summary('QQQM')
+            schd_news = get_market_summary('SCHD')
+            iau_news = get_market_summary('IAU')
+            qqqm_an = _interpret_asset('QQQM', '나스닥 100', qqqm_data['change_pct'], qqqm_news)
+            schd_an = _interpret_asset('SCHD', '배당 성장', schd_data['change_pct'], schd_news)
+            iau_an = _interpret_asset('IAU', '금', iau_data['change_pct'], iau_news)
+
+        for label, color, an, data in [
+            ("QQQM (나스닥 100)", "#10b981", qqqm_an, qqqm_data),
+            ("SCHD (배당 성장)", "#3b82f6", schd_an, schd_data),
+            ("IAU (금)", "#fbbf24", iau_an, iau_data),
+        ]:
+            _ic = "📈" if data['change_pct'] >= 0 else "📉"
+            st.markdown(f"**{label}** — {_ic} {data['change_pct']:+.2f}% | {an['direction']} ({an['detail']})")
+            for n in an['news']:
+                st.caption(f"  {n['title'][:60]}")
+
+# =====================================================================
+# TAB 3 — 거시경제 & 전략 (Multi-AI Orchestration)
+# =====================================================================
 with tab3:
     st.header("거시경제 & 전략")
     nb = news_brief if isinstance(news_brief, dict) else {}
 
+    # ── 1 TODAY'S STRATEGY ──
     st.subheader("1 TODAY'S STRATEGY")
-    risk_label = nb.get("risk_level_label", "보통")
-    if risk_label == "높음":
-        stance = "🛡 방어 우위"
-        action = "💰 분할 매수 대기"
-    elif risk_label == "낮음":
-        stance = "✅ 위험선호"
-        action = "📈 추세 점진 추종"
+    _risk_label = nb.get("risk_level_label", "보통")
+    if _risk_label == "높음":
+        _stance, _act = "🛡 방어 우위", "💰 분할 매수 대기"
+    elif _risk_label == "낮음":
+        _stance, _act = "✅ 위험선호", "📈 추세 점진 추종"
     else:
-        stance = "⚖ 중립"
-        action = "💰 신호 확인 후 분할 대응"
-    st.markdown(f"**{stance}**  ")
-    st.markdown(f"**{action}**")
+        _stance, _act = "⚖ 중립", "💰 신호 확인 후 분할 대응"
+    st.markdown(f"**{_stance}** — {_act}")
     st.caption(short_korean(macro_summary.get("implication", ""), max_sentences=1))
 
+    # ── 2 MARKET SHOCK ALERT ──
     st.subheader("2 MARKET SHOCK ALERT")
     shock_events = detect_market_events(vix_data, fng_data, tnx_data, oil_data, nb)
-
     if shock_events:
         st.warning("⚠ MARKET EVENT\n" + "\n".join([f"- {x}" for x in shock_events[:3]]))
     else:
         st.success("현재 대형 매크로 충격 신호는 제한적입니다.")
 
+    # ── 3 MACRO DASHBOARD ──
     st.subheader("3 MACRO DASHBOARD")
-    vix_price = _safe_float((vix_data or {}).get("price"), 20.0)
-    oil_price = _safe_float((oil_data or {}).get("price"), 0.0)
+    _vix_p = _safe_float((vix_data or {}).get("price"), 20.0)
+    _oil_p = _safe_float((oil_data or {}).get("price"), 0.0)
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("VIX", f"{vix_price:.2f}")
+    k1.metric("VIX", f"{_vix_p:.2f}")
     k2.metric("Fear & Greed", f"{_safe_int((fng_data or {}).get('value'), 50)}")
     k3.metric("10Y Treasury", f"{_safe_float((tnx_data or {}).get('price'), 0.0):.2f}%")
-    k4.metric("Oil", f"${oil_price:.2f}")
+    k4.metric("Oil", f"${_oil_p:.2f}")
 
+    # ── 4 RISK RADAR ──
     st.subheader("4 RISK RADAR")
     radar = build_risk_radar(vix_data, fng_data, nb)
-    st.write("금리 리스크")
-    st.progress(_safe_int(radar.get("금리 리스크"), 40))
-    st.write("인플레이션 리스크")
-    st.progress(_safe_int(radar.get("인플레이션 리스크"), 40))
-    st.write("지정학 리스크")
-    st.progress(_safe_int(radar.get("지정학 리스크"), 35))
-    st.write("시장 스트레스")
-    st.progress(_safe_int(radar.get("시장 스트레스"), 40))
+    for rname in ["금리 리스크", "인플레이션 리스크", "지정학 리스크", "시장 스트레스"]:
+        st.write(rname)
+        st.progress(_safe_int(radar.get(rname), 40))
 
+    # ── 5 TOP MARKET DRIVERS ──
     st.subheader("5 TOP MARKET DRIVERS")
-    drivers = nb.get("macro_drivers", [])
-    if not isinstance(drivers, list):
-        drivers = []
-    label_map = {
+    _label_map = {
         "POLICY_RATE_RISK": "금리 경로 리스크",
         "YIELD_PRESSURE": "장기금리 압력",
         "INFLATION_PRESSURE": "인플레이션 압력",
@@ -1170,2011 +1757,142 @@ with tab3:
         "ENERGY_SUPPLY_RISK": "에너지 공급 리스크",
         "MARKET_STRESS": "시장 스트레스",
     }
-    top_cats = (nb.get("dominant_categories", []) or ["OTHER"])[:3]
-    if top_cats:
-        for i, cat in enumerate(top_cats, start=1):
-            st.markdown(f"{i}️⃣ {label_map.get(cat, '기타 이슈')}")
-    else:
-        st.info("현재 주요 거시 동인이 없습니다.")
+    _top_cats = (nb.get("dominant_categories", []) or ["OTHER"])[:3]
+    for i, cat in enumerate(_top_cats, start=1):
+        st.markdown(f"{i}️⃣ {_label_map.get(cat, '기타 이슈')}")
 
+    # ── 6 MARKET INTERPRETATION ──
     st.subheader("6 MARKET INTERPRETATION")
-    st.markdown(short_korean(nb.get("market_implication", "시장 방향은 아직 불확실합니다. 금리 흐름 확인이 필요합니다."), max_sentences=2))
+    st.markdown(short_korean(nb.get("market_implication", "시장 방향은 아직 불확실합니다."), max_sentences=2))
 
+    # ── 7 PORTFOLIO IMPACT ──
     st.subheader("7 PORTFOLIO IMPACT")
-    asset_imp = nb.get("asset_implications", {}) if isinstance(nb.get("asset_implications"), dict) else {}
+    _aimp = nb.get("asset_implications", {}) if isinstance(nb.get("asset_implications"), dict) else {}
     impact_df = pd.DataFrame([
-        {"자산": "QQQM", "관점": short_korean(asset_imp.get("QQQM", "성장주 변동성 확대 가능성을 점검하세요."), 1)},
-        {"자산": "SCHD", "관점": short_korean(asset_imp.get("SCHD", "배당 방어 역할을 확인하세요."), 1)},
-        {"자산": "IAU", "관점": short_korean(asset_imp.get("IAU", "지정학 리스크 헤지 흐름을 확인하세요."), 1)},
-        {"자산": "SGOV", "관점": short_korean(asset_imp.get("SGOV", "현금 대기 전략 유효성을 점검하세요."), 1)},
+        {"자산": "QQQM", "관점": short_korean(_aimp.get("QQQM", "성장주 변동성 확대 가능성을 점검하세요."), 1)},
+        {"자산": "SCHD", "관점": short_korean(_aimp.get("SCHD", "배당 방어 역할을 확인하세요."), 1)},
+        {"자산": "IAU", "관점": short_korean(_aimp.get("IAU", "지정학 리스크 헤지 흐름을 확인하세요."), 1)},
+        {"자산": "SGOV", "관점": short_korean(_aimp.get("SGOV", "현금 대기 전략 유효성을 점검하세요."), 1)},
     ])
     st.dataframe(impact_df, width='stretch', hide_index=True)
 
+    # ── 8 WATCH POINTS ──
     st.subheader("8 WATCH POINTS")
-    watch_points = nb.get("watch_points", [])
-    if not isinstance(watch_points, list):
-        watch_points = []
-    for wp in (watch_points or ["미국 10년물 금리", "VIX 방향", "유가 100달러 유지 여부"])[:4]:
+    _wp = nb.get("watch_points", [])
+    if not isinstance(_wp, list):
+        _wp = []
+    for wp in (_wp or ["미국 10년물 금리", "VIX 방향", "유가 100달러 유지 여부"])[:4]:
         st.markdown(f"- {wp}")
 
+    # ── 9 NEWS SIGNAL ──
     st.subheader("9 NEWS SIGNAL")
     st.markdown(short_korean(nb.get("headline_summary", "뉴스 요약 데이터가 부족합니다."), max_sentences=2))
     st.caption(f"요약 엔진: {'Gemini' if nb.get('brief_source') == 'gemini' else '규칙 기반'}")
 
     st.markdown("---")
-    st.subheader("AI 전략 어드바이저")
-    if st.button("AI 전략 분석 실행", width='stretch'):
-        api_key = st.secrets.get("OPENAI_API_KEY", "")
-        qqqm_sma200 = _safe_float(qqqm_data.get("sma_200"), 0.0)
-        qqqm_price = _safe_float(qqqm_data.get("price"), 0.0)
-        sma200_gap = ((qqqm_price - qqqm_sma200) / qqqm_sma200 * 100.0) if qqqm_sma200 > 0 else 0.0
-        cash_level = "높음" if cash_pct >= 15 else ("중간" if cash_pct >= 8 else "낮음")
 
-        context = build_context(
-            portfolio_weight={
-                "QQQM": round(qqqm_pct, 2),
-                "SCHD": round(schd_pct, 2),
-                "IAU": round(iau_pct, 2),
-                "SGOV+현금": round(cash_pct, 2),
-            },
+    # ── Multi-AI Orchestration ──
+    st.subheader("AI 전략 오케스트레이션")
+    st.caption("Gemini (이벤트 탐지) → Claude (거시 해석) → OpenAI (전략 어드바이저)")
+
+    if st.button("AI 분석 실행", width='stretch', key="ai_orch"):
+        openai_key = st.secrets.get("OPENAI_API_KEY", "")
+        claude_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+
+        # Build decision context
+        from fire25.ai.decision_context_builder import build_decision_context
+        from fire25.ai.ai_router import run_all as ai_run_all
+        from fire25.ai.ai_formatter import format_gemini_section, format_claude_section, format_openai_section
+
+        _qqqm_sma200 = _safe_float(qqqm_data.get("sma_200"), 0.0)
+        _qqqm_price = _safe_float(qqqm_data.get("price"), 0.0)
+        _sma200_gap = ((_qqqm_price - _qqqm_sma200) / _qqqm_sma200 * 100.0) if _qqqm_sma200 > 0 else 0.0
+        _cash_level = "높음" if cash_pct >= 15 else ("중간" if cash_pct >= 8 else "낮음")
+
+        decision_ctx = build_decision_context(
+            portfolio_weight={"QQQM": round(qqqm_pct, 2), "SCHD": round(schd_pct, 2), "IAU": round(iau_pct, 2), "SGOV+현금": round(cash_pct, 2)},
             target_weight={"QQQM": 72.0, "SCHD": 16.0, "IAU": 2.0, "SGOV+현금": 10.0},
-            recent_buys=[],
-            cash_level=cash_level,
+            cash_level=_cash_level,
             vix=_safe_float((vix_data or {}).get("price"), 20.0),
-            fear_greed=_safe_float((fng_data or {}).get("value"), 50.0),
+            fear_greed=_safe_int((fng_data or {}).get("value"), 50),
             qqqm_rsi=_safe_float(qqqm_data.get("rsi"), 50.0),
-            qqqm_sma200_gap=round(sma200_gap, 2),
+            qqqm_sma200_gap=round(_sma200_gap, 2),
             treasury_10y=_safe_float((tnx_data or {}).get("price"), 0.0),
             oil_price=_safe_float((oil_data or {}).get("price"), 0.0),
-            macro_summary=short_korean(str(macro_summary.get("implication", "")), 2),
-            top_news_summary=short_korean(str(nb.get("headline_summary", "")), 2),
-            market_regime=str(regime_raw),
+            regime=str(regime_info.get("regime", "CORRECTION")),
+            macro_summary_text=short_korean(str(macro_summary.get("implication", "")), 2),
+            news_summary_text=short_korean(str(nb.get("headline_summary", "")), 2),
+            news_brief=nb,
+            shock_events=shock_events,
+            risk_radar=radar,
         )
 
-        advice = get_ai_advice(context=context, api_key=api_key)
-        ai_source = str(advice.get("_ai_source", "fallback"))
-        debug_error = advice.get("_debug_error", None)
-        response_id = advice.get("_response_id")
-        input_tokens = advice.get("_input_tokens")
-        output_tokens = advice.get("_output_tokens")
-        total_tokens = advice.get("_total_tokens")
+        with st.spinner("AI 분석 중..."):
+            ai_results = ai_run_all(
+                decision_context=decision_ctx,
+                articles=market_news,
+                aggregated_signals=nb.get("aggregated_signals", {}),
+                theme_info=nb.get("theme_info", {}),
+                asset_focus="growth",
+                openai_api_key=openai_key,
+                claude_api_key=claude_key,
+            )
 
-        if ai_source == "openai":
-            st.caption("AI 상태: OpenAI 응답")
-        else:
-            st.caption("AI 상태: fallback 응답")
-            if debug_error:
-                st.caption(f"디버그: {debug_error}")
+        # ── Gemini events ──
+        st.markdown("---")
+        st.markdown("##### Gemini 이벤트 탐지")
+        gf = format_gemini_section(ai_results["gemini"])
+        st.markdown(f"**헤드라인**: {gf['headline']}")
+        st.markdown(f"**시장 시사점**: {gf['implication']}")
+        st.caption(f"리스크: {gf['risk_label']} | 소스: {gf['source']}")
 
-        if response_id:
-            st.caption(f"response_id: {response_id}")
-        if total_tokens is not None:
-            st.caption(f"토큰 사용량: input {input_tokens or 0} / output {output_tokens or 0} / total {total_tokens}")
+        # ── Claude macro ──
+        st.markdown("---")
+        st.markdown("##### Claude 거시 해석")
+        cf = format_claude_section(ai_results["claude"])
+        st.info(f"**거시 관점**: {cf['macro_view']}")
+        st.markdown(f"- **핵심 리스크**: {cf['key_risk']}")
+        st.markdown(f"- **기회 요인**: {cf['opportunity']}")
+        st.markdown(f"- **주시점**: {cf['watch_point']}")
+        st.caption(f"소스: {cf['source']}")
+
+        # ── OpenAI strategy ──
+        st.markdown("---")
+        st.markdown("##### OpenAI 전략 어드바이저")
+        of = format_openai_section(ai_results["openai"])
 
         d1, d2, d3 = st.columns(3)
-        with d1:
-            dp = advice.get("dip_probability", 0)
-            st.metric("Dip Probability", f"{dp}%")
-        with d2:
-            st.metric("Risk Level", advice.get("risk_level", "보통"))
-        with d3:
-            st.metric("AI Confidence", advice.get("confidence", "낮음"))
+        d1.metric("Dip Probability", f"{of['dip_probability']}%")
+        d2.metric("Risk Level", of['risk_level'])
+        d3.metric("AI Confidence", of['confidence'])
 
         a1, a2 = st.columns(2)
         with a1:
             st.markdown("**오늘 시장 해석**")
-            st.info(advice.get("market_view", "데이터가 부족합니다."))
+            st.info(of.get("market_view", "데이터 부족"))
             st.markdown("**Shield 경보**")
-            st.warning(advice.get("shield_alert", "데이터가 부족합니다."))
+            st.warning(of.get("shield_alert", "데이터 부족"))
         with a2:
             st.markdown("**웅줍 신호**")
-            st.info(advice.get("dip_signal", "데이터가 부족합니다."))
+            st.info(of.get("dip_signal", "데이터 부족"))
             st.markdown("**다음 액션**")
-            st.success(advice.get("action", "데이터가 부족합니다."))
+            st.success(of.get("action", "데이터 부족"))
+        st.caption(f"소스: {of['source']}")
 
-    if not market_news:
-        st.warning("데이터를 불러오는 중입니다.")
-
-
-# Legacy long-form rendering is kept below for reference but disabled.
-st.stop()
-
-# =====================================================================
-# Main dashboard real-time quotes (legacy)
-st.header("실시간 시세")
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    change_class = 'positive' if qqqm_data['change'] >= 0 else 'negative'
-    st.metric(
-        label="QQQM (성장 코어)",
-        value=f"${qqqm_data['price']:.2f}",
-        delta=f"{qqqm_data['change_pct']:+.2f}%"
-    )
-    st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>거래량: {qqqm_data['volume']:,.0f}</p>", unsafe_allow_html=True)
-
-with col2:
-    change_class = 'positive' if schd_data['change'] >= 0 else 'negative'
-    st.metric(
-        label="SCHD (배당 코어)",
-        value=f"${schd_data['price']:.2f}",
-        delta=f"{schd_data['change_pct']:+.2f}%"
-    )
-    st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>거래량: {schd_data['volume']:,.0f}</p>", unsafe_allow_html=True)
-
-with col3:
-    change_class = 'positive' if iau_data['change'] >= 0 else 'negative'
-    st.metric(
-        label="IAU (금 ETF)",
-        value=f"${iau_data['price']:.2f}",
-        delta=f"{iau_data['change_pct']:+.2f}%"
-    )
-    st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>거래량: {iau_data['volume']:,.0f}</p>", unsafe_allow_html=True)
-
-with col4:
-    if sgov_data:
-        st.metric(
-            label="SGOV (현금성 ETF)",
-            value=f"${sgov_price:.2f}",
-            delta=f"{sgov_data['change_pct']:+.2f}%"
-        )
-        st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>보유 수량: {sgov_qty:,.2f}주</p>", unsafe_allow_html=True)
-    else:
-        st.metric(label="SGOV (현금성 ETF)", value=f"${sgov_price:.2f}")
-        st.markdown(f"<p style='font-size: 0.85em; color: #94a3b8;'>보유 수량: {sgov_qty:,.2f}주</p>", unsafe_allow_html=True)
-
-    # Market sentiment (VIX + Fear & Greed)
-st.markdown("<br>", unsafe_allow_html=True)
-col_vix, col_fng = st.columns(2)
-
-with col_vix:
-    if vix_data:
-        vix_color = "#10b981" if vix_data['price'] <= 20 else ("#fbbf24" if vix_data['price'] <= 30 else "#ef4444")
-        vix_status = "안정" if vix_data['price'] <= 14 else ("정상" if vix_data['price'] <= 20 else ("주의" if vix_data['price'] <= 30 else "위험"))
-        defcon_warning = "⚠️ DEFCON 조건!" if vix_data['price'] <= 14.0 else ""
-        
-        st.markdown(f"""
-        <div style="background: #1e293b; border: 2px solid {vix_color}; border-radius: 12px; padding: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">VIX (변동성 지수)</p>
-                    <p style="color: {vix_color}; font-size: 2.5em; font-weight: 800; margin: 5px 0;">{vix_data['price']:.2f}</p>
-                    <p style="color: {'#ef4444' if vix_data['change_pct'] > 0 else '#10b981'}; font-size: 1em; margin: 0;">
-                        {'📈' if vix_data['change_pct'] > 0 else '📉'} {vix_data['change_pct']:+.2f}%
-                    </p>
-                </div>
-                <div style="text-align: right;">
-                    <p style="color: {vix_color}; font-size: 1.5em; font-weight: 700; margin: 0;">{vix_status}</p>
-                    <p style="color: #ef4444; font-size: 1em; font-weight: 700; margin: 5px 0;">{defcon_warning}</p>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.warning("VIX 데이터 없음")
-
-with col_fng:
-    if fng_data:
-        fng_value = fng_data['value']
-        
-        # Color and label by Fear & Greed score
-        if fng_value >= 75:
-            fng_color = "#ef4444"
-            fng_label = "극단적 탐욕"
-            fng_icon = "🔴"
-            fng_advice = "시장 과열 주의"
-        elif fng_value >= 55:
-            fng_color = "#f97316"
-            fng_label = "탐욕"
-            fng_icon = "🟡"
-            fng_advice = "상승 추세"
-        elif fng_value >= 45:
-            fng_color = "#fbbf24"
-            fng_label = "중립"
-            fng_icon = "🟡"
-            fng_advice = "관망세"
-        elif fng_value >= 25:
-            fng_color = "#3b82f6"
-            fng_label = "공포"
-            fng_icon = "🔵"
-            fng_advice = "매수 기회 탐색"
+    # ── News articles ──
+    with st.expander("수집된 대표 뉴스 보기", expanded=False):
+        if market_news:
+            for item in market_news[:5]:
+                title = (item.get("title") or "").strip()
+                source = (item.get("source") or "출처 미상").strip()
+                if title:
+                    st.markdown(f"- {title} ({source})")
         else:
-            fng_color = "#8b5cf6"
-            fng_label = "극단적 공포"
-            fng_icon = "🔴"
-            fng_advice = "역추세 매수 고려"
-        
-        # Daily change vs previous close
-        prev_value = fng_data.get('previous')
-        if prev_value:
-            try:
-                prev_val = int(prev_value)
-                fng_change = fng_value - prev_val
-                fng_change_str = f"{'📈' if fng_change > 0 else '📉'} {fng_change:+d} (전일대비)"
-            except:
-                fng_change_str = ""
-        else:
-            fng_change_str = ""
-        
-        st.markdown(f"""
-        <div style="background: #1e293b; border: 2px solid {fng_color}; border-radius: 12px; padding: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">공포·탐욕 지수</p>
-                    <p style="color: {fng_color}; font-size: 2.5em; font-weight: 800; margin: 5px 0;">{fng_value}</p>
-                    <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">{fng_change_str}</p>
-                </div>
-                <div style="text-align: right;">
-                    <p style="font-size: 1.8em; margin: 0;">{fng_icon}</p>
-                    <p style="color: {fng_color}; font-size: 1.3em; font-weight: 700; margin: 5px 0;">{fng_label}</p>
-                    <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">{fng_advice}</p>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div style="background: #1e293b; border: 2px solid #475569; border-radius: 12px; padding: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <p style="color: #94a3b8; font-size: 0.9em; margin: 0;">공포·탐욕 지수</p>
-                    <p style="color: #64748b; font-size: 2.5em; font-weight: 800; margin: 5px 0;">N/A</p>
-                    <p style="color: #475569; font-size: 0.85em; margin: 0;">CNN 연결 실패</p>
-                </div>
-                <div style="text-align: right;">
-                    <p style="font-size: 1.8em; margin: 0;">⚠️</p>
-                    <p style="color: #64748b; font-size: 1.3em; font-weight: 700; margin: 5px 0;">데이터 없음</p>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-st.header("📊 포트폴리오 요약")
-sum_col1, sum_col2, sum_col3, sum_col4, sum_col5 = st.columns(5)
-with sum_col1:
-    st.metric("총 자산", f"${total_value:,.2f}")
-with sum_col2:
-    st.metric("QQQM", f"{qqqm_pct:.1f}%")
-with sum_col3:
-    st.metric("SCHD", f"{schd_pct:.1f}%")
-with sum_col4:
-    st.metric("IAU", f"{iau_pct:.1f}%")
-with sum_col5:
-    st.metric("현금", f"{cash_pct:.1f}%")
-
-regime_info = detect_market_regime(
-    qqqm_data["df"],
-    vix_data["price"] if vix_data else None,
-)
-
-regime_label_map = {
-    "BULL": "🟢 상승장",
-    "CORRECTION": "🟡 조정장",
-    "BEAR": "🔴 하락장",
-    "RECOVERY": "🔵 회복장",
-}
-regime_color_map = {
-    "BULL": "#10b981",
-    "CORRECTION": "#f59e0b",
-    "BEAR": "#ef4444",
-    "RECOVERY": "#3b82f6",
-}
-
-current_regime = regime_info.get("regime", "CORRECTION")
-current_regime_label = regime_label_map.get(current_regime, "🟡 조정장")
-current_regime_color = regime_color_map.get(current_regime, "#f59e0b")
-current_confidence = float(regime_info.get("confidence", 0.0))
-current_reasons = regime_info.get("reason", [])
-
-st.header("📊 시장 국면")
-st.markdown(
-    f"<span style='background: {current_regime_color}; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700;'>{current_regime_label}</span>",
-    unsafe_allow_html=True,
-)
-st.caption(f"신뢰도: {current_confidence * 100:.1f}%")
-for item in current_reasons:
-    st.markdown(f"- {item}")
-
-
-@st.cache_data(ttl=1800)
-def fetch_news_brief(lookback_days=2, max_articles=20, region="US", asset_focus="growth"):
-    """뉴스 기반 거시 브리핑 캐시 fetch."""
-    try:
-        return get_news_brief(
-            lookback_days=lookback_days,
-            max_articles=max_articles,
-            region=region,
-            asset_focus=asset_focus,
-        )
-    except Exception:
-        return {
-            "status": "fallback",
-            "as_of": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "article_count": 0,
-            "headline_summary": "뉴스 데이터를 불러오지 못해 지표 기반 요약을 우선 표시합니다.",
-            "macro_drivers": [],
-            "market_implication": "변동성 지표와 금리 흐름을 중심으로 보수적으로 대응하세요.",
-            "portfolio_implication": "전략 신호와 현금성 자산 비중을 기준으로 단계적으로 대응하세요.",
-            "asset_implications": {
-                "QQQM": "금리와 변동성 민감도를 우선 점검하세요.",
-                "SCHD": "배당/퀄리티 방어 특성을 점검하세요.",
-                "IAU": "실질금리와 안전자산 수요를 확인하세요.",
-                "SGOV": "현금성 완충 기능을 유지하세요.",
-            },
-            "watch_points": ["미국 10년물 금리 방향", "VIX 재상승 여부"],
-            "sentiment_score": 0.0,
-            "risk_level": "MODERATE",
-            "risk_level_label": "보통",
-            "core_article_count": 0,
-            "secondary_article_count": 0,
-            "articles": [],
-            "brief_source": "rule_based",
-        }
-
-
-news_brief = fetch_news_brief(lookback_days=2, max_articles=20, region="US", asset_focus="growth")
-market_news = news_brief.get("articles", []) if isinstance(news_brief, dict) else []
-
-macro_summary = summarize_macro_today(
-    vix_data=vix_data,
-    fng_data=fng_data,
-    qqqm_data=qqqm_data,
-    sgov_data=sgov_data,
-    market_news=market_news,
-    news_brief=news_brief,
-)
-
-st.header("오늘의 거시경제 요약")
-st.markdown(
-    f"<span style='background: {macro_summary['color']}; color: white; padding: 6px 14px; border-radius: 6px; font-weight: 700;'>{macro_summary['regime_label']}</span>",
-    unsafe_allow_html=True,
-)
-for line in macro_summary["bullets"]:
-    st.markdown(f"- {line}")
-st.caption(macro_summary["title"])
-st.markdown(f"**시사점**: {macro_summary['implication']}")
-
-st.subheader("📰 뉴스 기반 거시경제 브리핑")
-nb = news_brief if isinstance(news_brief, dict) else {}
-
-meta_col1, meta_col2, meta_col3, meta_col4 = st.columns(4)
-meta_col1.metric("기준 시각", nb.get("as_of", "-"))
-meta_col2.metric("기사 수", f"{nb.get('article_count', 0)}건")
-meta_col3.metric("기사 수 (핵심/보조)", f"{nb.get('core_article_count', 0)} / {nb.get('secondary_article_count', 0)}")
-meta_col4.metric("리스크 수준", nb.get("risk_level_label", "보통"))
-
-engine_name = "Gemini" if nb.get("brief_source") == "gemini" else "규칙 기반"
-st.caption(f"요약 엔진: {engine_name}")
-
-st.markdown(f"**오늘의 뉴스 요약**: {nb.get('headline_summary', '뉴스 기반 요약을 생성하지 못했습니다.')}")
-
-st.markdown("**시장 시사점**")
-st.markdown(f"- {nb.get('market_implication', '시장 시사점을 계산하지 못했습니다.')}")
-
-st.markdown("**포트폴리오 관점**")
-st.markdown(f"- {nb.get('portfolio_implication', '전략 신호 중심의 보수적 운용을 유지하세요.')}")
-
-st.markdown("**자산별 관점**")
-asset_notes = nb.get("asset_implications", {}) if isinstance(nb.get("asset_implications"), dict) else {}
-st.markdown(f"- QQQM: {asset_notes.get('QQQM', '금리와 변동성 민감도를 중심으로 점검하세요.')}")
-st.markdown(f"- SCHD: {asset_notes.get('SCHD', '배당/퀄리티 방어 역할과 이익 전망 변화를 확인하세요.')}")
-st.markdown(f"- IAU: {asset_notes.get('IAU', '실질금리와 안전자산 선호 흐름을 함께 점검하세요.')}")
-st.markdown(f"- SGOV: {asset_notes.get('SGOV', '현금성 완충 자산으로 변동성 대응 여력을 유지하세요.')}")
-
-st.markdown("**체크 포인트**")
-watch_points = nb.get("watch_points", []) or ["미국 10년물 금리 방향", "VIX 재상승 여부"]
-for point in watch_points[:4]:
-    st.markdown(f"- {point}")
-
-with st.expander("수집된 대표 뉴스 보기", expanded=False):
-    if market_news:
-        for item in market_news[:5]:
-            title = (item.get("title") or "").strip()
-            source = (item.get("source") or "출처 미상").strip()
-            if title:
-                st.markdown(f"- {title} ({source})")
-    else:
-        st.caption("현재 수집된 대표 뉴스가 없습니다.")
-
-st.markdown("---")
+            st.caption("현재 수집된 대표 뉴스가 없습니다.")
 
 # =====================================================================
-# 3) Strategy Engine
+# Footer
 # =====================================================================
-# =====================================================================
-# Strategy logic: Manual v5.10
-# =====================================================================
-st.header("전략 조건 분석")
-
-# DEFCON is computed by strategy engine
-defcon_triggered = detect_defcon(
-    vix_data['price'] if vix_data else None,
-    qqqm_data.get('rsi'),
-)
-
-# Puddle logic is computed by signals engine
-puddle_result = calculate_puddle_signal(qqqm_data["df"], cooldown_days=30)
-puddle_stage = puddle_result.stage
-puddle_alert = puddle_result.alert
-puddle_cooldown_active = puddle_result.cooldown_active
-cooldown_info = puddle_result.cooldown_info or ""
-
-shoulder_eval = evaluate_smart_shoulder(qqqm_data['df'], qqqm_pct)
-condition_1_over_77 = bool(shoulder_eval['over_threshold'])
-condition_2_below_sma20 = bool(shoulder_eval['below_sma20'])
-condition_3_after_high = bool(shoulder_eval['after_high'])
-smart_shoulder_triggered = bool(shoulder_eval['triggered'])
-rebalancing_needed = bool(shoulder_eval['rebalancing_needed'])
-
-# Alerts
-if defcon_triggered:
-    st.markdown(f"""
-    <div class="warning-box">
-        <div class="warning-title">⚠️ DEFCON 세이빙 발동</div>
-        <p><strong>VIX:</strong> {vix_data['price']:.2f} (<= 14.00)</p>
-        <p><strong>RSI:</strong> {qqqm_data['rsi']:.2f} (>= 70)</p>
-        <p><strong>조치:</strong> 신규 자금 100%를 SGOV로 배분 (QQQM/SCHD/IAU 매수 차단)</p>
-        <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
-        <p style="font-weight: 700; color: #8b5cf6; font-size: 1.1em;">🔔 SGOV를 이미 매수한 경우</p>
-        <div style="background: rgba(139, 92, 246, 0.1); padding: 12px; border-radius: 6px; margin: 10px 0;">
-            <p style="margin: 5px 0;"><strong>관찰:</strong> VIX &gt; 14 또는 RSI &lt; 70이면 DEFCON 해제</p>
-            <p style="margin: 5px 0;"><strong>해제 후:</strong> 정상 비중(72/16/2/10)으로 복귀</p>
-            <p style="margin: 5px 0;"><strong>기존 포지션:</strong> 보유 유지 (강제 매도 없음)</p>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-if puddle_alert:
-    # Puddle stage guidance card
-    stage_info = {
-        1: {"name": "1단계: SMA50 하향 이탈", "color": "#fbbf24", "rate": 15, "desc": "완만한 조정 구간입니다. 보수적으로 분할 진입합니다."},
-        2: {"name": "2단계: SMA100 하향 이탈", "color": "#f97316", "rate": 35, "desc": "깊은 조정 구간입니다. 계획대로 분할 진입합니다."},
-        3: {"name": "3단계: SMA200 하향 이탈", "color": "#ef4444", "rate": 50, "desc": "고스트레스 구간입니다. 규율 있게 투입합니다."},
-        4: {"name": "4단계: SMA200 회복", "color": "#10b981", "rate": 100, "desc": "회복이 확인되었습니다. 정상 비중으로 복귀합니다."}
-    }
-    
-    info = stage_info[puddle_stage]
-    
-    # Dashboard policy: use current account snapshot only.
-    # 백테스트s/simulations should track remaining_cash internally across events.
-    remaining_cash = sgov_value + cash_deposit
-    injection_amount = compute_deployment(puddle_stage, remaining_cash)
-    cash_base = remaining_cash
-    
-    # Moving average labels
-    sma_50_val = f"${qqqm_data['sma_50']:.2f}" if pd.notna(qqqm_data['sma_50']) else "-"
-    sma_100_val = f"${qqqm_data['sma_100']:.2f}" if pd.notna(qqqm_data['sma_100']) else "-"
-    sma_200_val = f"${qqqm_data['sma_200']:.2f}" if pd.notna(qqqm_data['sma_200']) else "-"
-    
-    # Next action guidance
-    next_action_info = {
-        1: {"next": "2단계 (SMA100 하향 이탈)", "watch": "SMA100", "next_rate": "35% 투입"},
-        2: {"next": "3단계 (SMA200 하향 이탈)", "watch": "SMA200", "next_rate": "50% 투입"},
-        3: {"next": "4단계 (SMA200 회복)", "watch": "SMA200 회복", "next_rate": "100% 투입"},
-        4: {"next": "정상 운용", "watch": "포트폴리오 비중", "next_rate": "목표 비중 복귀"}
-    }
-    next_info = next_action_info[puddle_stage]
-    
-    st.markdown(f"""
-    <div class="warning-box" style="border-color: {info['color']};">
-        <div class="warning-title" style="color: {info['color']};">웅덩이 진입 구간: {info['name']}</div>
-        <p style="color: #10b981; font-size: 0.9em;">30일 쿨다운이 해제되어 신규 신호 실행이 가능합니다.</p>
-        <p><strong>현재가:</strong> ${qqqm_data['price']:.2f}</p>
-        <p><strong>SMA50:</strong> {sma_50_val} | <strong>SMA100:</strong> {sma_100_val} | <strong>SMA200:</strong> {sma_200_val}</p>
-        <p><strong>해석:</strong> {info['desc']}</p>
-        <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
-        <p style="font-weight: 700; color: {info['color']}; font-size: 1.1em;">현재 투입 계획 (v5.10)</p>
-        <div style="background: rgba(251, 191, 36, 0.05); padding: 12px; border-radius: 6px; margin: 10px 0;">
-            <p style="margin: 5px 0;"><strong>현금성 자산:</strong> ${cash_base:,.2f}</p>
-            <p style="margin: 5px 0;">구성: SGOV ${sgov_value:,.2f} + 예수금 ${cash_deposit:,.2f}</p>
-            <p style="margin: 5px 0;"><strong>투입 비율:</strong> {info['rate']}%</p>
-            <p style="margin: 5px 0; font-size: 1.2em; color: {info['color']};"><strong>투입 금액:</strong> ${injection_amount:,.2f}</p>
-        </div>
-        <p style="color: #10b981; font-weight: 700; margin-top: 10px;">신규 자금은 목표 비중 72/16/2/10으로 즉시 배분합니다.</p>
-        <hr style="border-color: rgba(239, 68, 68, 0.3); margin: 15px 0;">
-        <p style="font-weight: 700; color: #8b5cf6; font-size: 1.1em;">이번 투입 이후</p>
-        <div style="background: rgba(139, 92, 246, 0.1); padding: 12px; border-radius: 6px; margin: 10px 0;">
-            <p style="margin: 5px 0;"><strong>다음 단계:</strong> {next_info['next']}</p>
-            <p style="margin: 5px 0;"><strong>관찰:</strong> {next_info['watch']}</p>
-            <p style="margin: 5px 0;"><strong>다음 비율:</strong> {next_info['next_rate']}</p>
-            <p style="margin: 5px 0; color: #94a3b8;"><strong>신규 자금:</strong> 즉시 배분 (72/16/2/10).</p>
-            <p style="margin: 5px 0; color: #94a3b8;"><strong>쿨다운:</strong> 동일 단계는 30일간 재발동되지 않습니다.</p>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-# Cooldown active while signal is blocked
-if puddle_cooldown_active and not puddle_alert:
-    st.markdown(f"""
-    <div class="info-box">
-        <div class="warning-title">웅덩이 쿨다운 진행 중</div>
-        <p><strong>현재가:</strong> ${qqqm_data['price']:.2f} (대기)</p>
-        <p><strong>판단 근거:</strong> {cooldown_info if cooldown_info else "최근 30일 이내 신호 발생"}</p>
-        <hr style="border-color: rgba(251, 191, 36, 0.3); margin: 10px 0;">
-        <p style="color: #fbbf24;"><strong>조치:</strong> 다음 유효 신호를 대기합니다 (중복 매수 방지).</p>
-        <p style="color: #94a3b8; font-size: 0.9em;">신규 자금은 목표 비중에 따라 계속 즉시 배분됩니다.</p>
-        <p style="color: #64748b; font-size: 0.85em;">쿨다운은 30일 후 만료됩니다.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-if rebalancing_needed:
-    excess = qqqm_pct - 72
-    
-    # Build explanation of pending trigger conditions.
-    missing_conditions = []
-    if not condition_2_below_sma20:
-        missing_conditions.append("SMA20 하향 이탈")
-    if not condition_3_after_high:
-        missing_conditions.append("최근 고점 갱신")
-    
-    next_action_text = " + ".join(missing_conditions) if missing_conditions else "모든 조건 충족"
-    status_20 = "SMA20 하회" if condition_2_below_sma20 else "SMA20 상회"
-    status_high = "최근 고점 이후" if condition_3_after_high else "최근 고점 미확인"
-    st.info(
-        "QQQM 과비중 감지\n"
-        f"- QQQM allocation: {qqqm_pct:.2f}% (target: 72%)\n"
-        f"- Excess: +{excess:.2f}%p\n"
-        f"- SMA20 status: {status_20}\n"
-        f"- High update status: {status_high}\n"
-        "- 현재 조치: Smart Shoulder 트리거 대기\n"
-        f"- 다음 트리거 조건: {next_action_text}"
-    )
-
-if smart_shoulder_triggered:
-    excess = qqqm_pct - 72
-    st.error(
-        "Smart Shoulder 리밸런싱 발동\n"
-        f"- QQQM allocation: {qqqm_pct:.2f}% (target: 72%)\n"
-        f"- Excess: +{excess:.2f}%p\n"
-        f"- Condition 2: SMA20 하회 (${qqqm_data['sma_20']:.2f})\n"
-        "- 조치: 포트폴리오를 72/16/2/10으로 리밸런싱"
-    )
-
-# RSI status
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    rsi_status = ""
-    rsi_color = ""
-    if qqqm_data['rsi'] >= 70:
-        rsi_status = "과열"
-        rsi_color = "#ef4444"
-    elif qqqm_data['rsi'] <= 30:
-        rsi_status = "과매도"
-        rsi_color = "#3b82f6"
-    else:
-        rsi_status = "중립"
-        rsi_color = "#10b981"
-    
-    st.markdown(f"""
-    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.8) 100%); border-radius: 12px; border: 2px solid {rsi_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);">
-        <p style="font-size: 0.9em; color: #cbd5e1; margin-bottom: 8px; font-weight: 600;">RSI(14)</p>
-        <p style="font-size: 2.5em; font-weight: 700; color: {rsi_color}; margin: 10px 0;">{qqqm_data['rsi']:.2f}</p>
-        <p style="font-size: 1.1em; color: {rsi_color}; font-weight: 600;">{rsi_status}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col2:
-    sma_status = ""
-    sma_color = ""
-    if qqqm_data['price'] > qqqm_data['sma_20']:
-        sma_status = "SMA20 상회"
-        sma_color = "#10b981"
-    else:
-        sma_status = "SMA20 하회"
-        sma_color = "#fbbf24"
-    
-    st.markdown(f"""
-    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.8) 100%); border-radius: 12px; border: 2px solid {sma_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);">
-        <p style="font-size: 0.9em; color: #cbd5e1; margin-bottom: 8px; font-weight: 600;">SMA20</p>
-        <p style="font-size: 2.5em; font-weight: 700; color: {sma_color}; margin: 10px 0;">${qqqm_data['sma_20']:.2f}</p>
-        <p style="font-size: 1.1em; color: {sma_color}; font-weight: 600;">{sma_status}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col3:
-    sma_status = ""
-    sma_color = ""
-    if pd.notna(qqqm_data['sma_50']) and qqqm_data['price'] > qqqm_data['sma_50']:
-        sma_status = "SMA50 상회"
-        sma_color = "#10b981"
-    elif pd.notna(qqqm_data['sma_50']):
-        sma_status = "SMA50 하회"
-        sma_color = "#ef4444"
-    else:
-        sma_status = "데이터 부족"
-        sma_color = "#94a3b8"
-    
-    sma_50_display = f"${qqqm_data['sma_50']:.2f}" if pd.notna(qqqm_data['sma_50']) else "-"
-    
-    st.markdown(f"""
-    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.8) 100%); border-radius: 12px; border: 2px solid {sma_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);">
-        <p style="font-size: 0.9em; color: #cbd5e1; margin-bottom: 8px; font-weight: 600;">SMA50</p>
-        <p style="font-size: 2.5em; font-weight: 700; color: {sma_color}; margin: 10px 0;">{sma_50_display}</p>
-        <p style="font-size: 1.1em; color: {sma_color}; font-weight: 600;">{sma_status}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-# Additional indicators: SMA100, SMA200, puddle stage
-st.markdown("<br>", unsafe_allow_html=True)
-col4, col5, col6 = st.columns(3)
-
-with col4:
-    sma_status = ""
-    sma_color = ""
-    if pd.notna(qqqm_data['sma_100']) and qqqm_data['price'] > qqqm_data['sma_100']:
-        sma_status = "SMA100 상회"
-        sma_color = "#10b981"
-    elif pd.notna(qqqm_data['sma_100']):
-        sma_status = "SMA100 하회"
-        sma_color = "#f97316"
-    else:
-        sma_status = "데이터 부족"
-        sma_color = "#94a3b8"
-    
-    sma_100_display = f"${qqqm_data['sma_100']:.2f}" if pd.notna(qqqm_data['sma_100']) else "-"
-    
-    st.markdown(f"""
-    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.8) 100%); border-radius: 12px; border: 2px solid {sma_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);">
-        <p style="font-size: 0.9em; color: #cbd5e1; margin-bottom: 8px; font-weight: 600;">SMA100</p>
-        <p style="font-size: 2.5em; font-weight: 700; color: {sma_color}; margin: 10px 0;">{sma_100_display}</p>
-        <p style="font-size: 1.1em; color: {sma_color}; font-weight: 600;">{sma_status}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col5:
-    sma_status = ""
-    sma_color = ""
-    if pd.notna(qqqm_data['sma_200']) and qqqm_data['price'] > qqqm_data['sma_200']:
-        sma_status = "SMA200 상회"
-        sma_color = "#10b981"
-    elif pd.notna(qqqm_data['sma_200']):
-        sma_status = "SMA200 하회"
-        sma_color = "#ef4444"
-    else:
-        sma_status = "데이터 부족"
-        sma_color = "#94a3b8"
-    
-    sma_200_display = f"${qqqm_data['sma_200']:.2f}" if pd.notna(qqqm_data['sma_200']) else "-"
-    
-    st.markdown(f"""
-    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.8) 100%); border-radius: 12px; border: 2px solid {sma_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);">
-        <p style="font-size: 0.9em; color: #cbd5e1; margin-bottom: 8px; font-weight: 600;">SMA200</p>
-        <p style="font-size: 2.5em; font-weight: 700; color: {sma_color}; margin: 10px 0;">{sma_200_display}</p>
-        <p style="font-size: 1.1em; color: {sma_color}; font-weight: 600;">{sma_status}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col6:
-    # Puddle stage
-    if puddle_stage == 0:
-        stage_text = "정상"
-        stage_color = "#10b981"
-        stage_icon = "OK"
-    elif puddle_stage == 1:
-        stage_text = "1단계 (SMA50)"
-        stage_color = "#fbbf24"
-        stage_icon = "S1"
-    elif puddle_stage == 2:
-        stage_text = "2단계 (SMA100)"
-        stage_color = "#f97316"
-        stage_icon = "S2"
-    elif puddle_stage == 3:
-        stage_text = "3단계 (SMA200)"
-        stage_color = "#ef4444"
-        stage_icon = "S3"
-    else:  # stage 4
-        stage_text = "4단계 (회복)"
-        stage_color = "#10b981"
-        stage_icon = "S4"
-    
-    st.markdown(f"""
-    <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(51, 65, 85, 0.8) 100%); border-radius: 12px; border: 2px solid {stage_color}; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);">
-        <p style="font-size: 0.9em; color: #cbd5e1; margin-bottom: 8px; font-weight: 600;">웅덩이 단계</p>
-        <p style="font-size: 2em; font-weight: 700; color: {stage_color}; margin: 10px 0;">{stage_icon}</p>
-        <p style="font-size: 1.1em; color: {stage_color}; font-weight: 600;">{stage_text}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-st.markdown("---")
-
-# =====================================================================
-# Portfolio allocation analysis
-# =====================================================================
-st.header("포트폴리오 비중")
-
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    st.subheader("자산 구성")
-    st.metric("총 자산", f"${total_value:,.2f}")
-    
-    portfolio_df = pd.DataFrame({
-        'Asset': ['QQQM', 'SCHD', 'IAU', 'SGOV', '예수금', '현금 합계'],
-        'Value': [qqqm_value, schd_value, iau_value, sgov_value, cash_deposit, total_cash],
-        '현재 비중 (%)': [qqqm_pct, schd_pct, iau_pct, sgov_pct, deposit_pct, cash_pct],
-        '목표 비중 (%)': ['72.00%', '16.00%', '2.00%', '-', '-', '10.00%'],
-        '목표 대비 차이 (%p)': [
-            f'{qqqm_pct - 72:+.2f}%p',
-            f'{schd_pct - 16:+.2f}%p',
-            f'{iau_pct - 2:+.2f}%p',
-            '-',
-            '-',
-            f'{cash_pct - 10:+.2f}%p',
-        ]
-    })
-
-    def highlight_rows(row):
-        if row['Asset'] == '현금 합계':
-            return ['background-color: rgba(59, 130, 246, 0.1)'] * len(row)
-        if row['Asset'] in ['SGOV', '예수금']:
-            return ['background-color: rgba(148, 163, 184, 0.05)'] * len(row)
-        return [''] * len(row)
-
-    st.dataframe(
-        portfolio_df.style.format({
-            'Value': '${:,.2f}',
-            '현재 비중 (%)': '{:.2f}%',
-        }).apply(highlight_rows, axis=1),
-        width='stretch'
-    )
-
-with col2:
-    st.subheader("비중 차트")
-    
-    # Pie chart (mobile-optimized layout)
-    fig = go.Figure(data=[go.Pie(
-        labels=['QQQM', 'SCHD', 'IAU', 'SGOV', '예수금'],
-        values=[qqqm_value, schd_value, iau_value, sgov_value, cash_deposit],
-        hole=0.4,
-        marker=dict(colors=['#10b981', '#3b82f6', '#fbbf24', '#94a3b8', '#64748b']),
-        textinfo='label+percent',
-        textfont=dict(size=11, color='white'),
-        textposition='inside',
-        insidetextorientation='horizontal',
-        hovertemplate='<b>%{label}</b><br>$%{value:,.2f}<br>%{percent}<extra></extra>',
-        domain=dict(x=[0.1, 0.9], y=[0.15, 0.95])
-    )])
-    
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(color='#e2e8f0'),
-        height=380,
-        margin=dict(l=0, r=0, t=10, b=10),
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=0,
-            xanchor="center",
-            x=0.5,
-            font=dict(size=10)
-        ),
-        uniformtext=dict(minsize=11, mode='show')  # Keep text readable across slices
-    )
-    
-    st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})
-
-st.markdown("---")
-
-# =====================================================================
-# Technical chart
-# =====================================================================
-st.header("📊 QQQM 기술적 분석")
-
-# 현재가 chart
-fig = go.Figure()
-
-# Candlestick
-fig.add_trace(go.Candlestick(
-    x=qqqm_data['df'].index,
-    open=qqqm_data['df']['Open'],
-    high=qqqm_data['df']['High'],
-    low=qqqm_data['df']['Low'],
-    close=qqqm_data['df']['Close'],
-    name='QQQM',
-    increasing_line_color='#ef4444',
-    decreasing_line_color='#3b82f6'
-))
-
-# Moving average lines
-fig.add_trace(go.Scatter(
-    x=qqqm_data['df'].index,
-    y=qqqm_data['df']['SMA_20'],
-    mode='lines',
-    name='SMA20',
-    line=dict(color='#fbbf24', width=1.5)
-))
-
-fig.add_trace(go.Scatter(
-    x=qqqm_data['df'].index,
-    y=qqqm_data['df']['SMA_50'],
-    mode='lines',
-    name='SMA50',
-    line=dict(color='#3b82f6', width=2)
-))
-
-fig.add_trace(go.Scatter(
-    x=qqqm_data['df'].index,
-    y=qqqm_data['df']['SMA_100'],
-    mode='lines',
-    name='SMA100',
-    line=dict(color='#f97316', width=2)
-))
-
-fig.add_trace(go.Scatter(
-    x=qqqm_data['df'].index,
-    y=qqqm_data['df']['SMA_200'],
-    mode='lines',
-    name='SMA200',
-    line=dict(color='#ef4444', width=2.5)
-))
-
-fig.update_layout(
-    plot_bgcolor='rgba(30, 41, 59, 0.5)',
-    paper_bgcolor='rgba(0,0,0,0)',
-    font=dict(color='#e2e8f0'),
-    xaxis=dict(
-        gridcolor='rgba(148, 163, 184, 0.2)',
-        showgrid=True
-    ),
-    yaxis=dict(
-        gridcolor='rgba(148, 163, 184, 0.2)',
-        showgrid=True,
-        title='현재가 (USD)'
-    ),
-    height=500,
-    hovermode='x unified',
-    legend=dict(
-        orientation="h",
-        yanchor="bottom",
-        y=1.02,
-        xanchor="right",
-        x=1,
-        bgcolor='rgba(30, 41, 59, 0.8)',
-        bordercolor='#475569',
-        borderwidth=1
-    )
-)
-
-st.plotly_chart(fig, width='stretch')
-
-# RSI 李⑦듃
-fig_rsi = go.Figure()
-
-fig_rsi.add_trace(go.Scatter(
-    x=qqqm_data['df'].index,
-    y=qqqm_data['df']['RSI'],
-    mode='lines',
-    name='RSI(14)',
-    line=dict(color='#10b981', width=2)
-))
-
-# 과열 / 과매도 lines
-fig_rsi.add_hline(y=70, line_dash="dash", line_color="#ef4444", annotation_text="과열(70)")
-fig_rsi.add_hline(y=30, line_dash="dash", line_color="#3b82f6", annotation_text="과매도(30)")
-
-fig_rsi.update_layout(
-    plot_bgcolor='rgba(30, 41, 59, 0.5)',
-    paper_bgcolor='rgba(0,0,0,0)',
-    font=dict(color='#e2e8f0'),
-    xaxis=dict(
-        gridcolor='rgba(148, 163, 184, 0.2)',
-        showgrid=True
-    ),
-    yaxis=dict(
-        gridcolor='rgba(148, 163, 184, 0.2)',
-        showgrid=True,
-        title='RSI',
-        range=[0, 100]
-    ),
-    height=300,
-    hovermode='x unified'
-)
-
-st.plotly_chart(fig_rsi, width='stretch')
-
-if backtest_enabled:
-    bt_stage_rates = {k: v for k, v in STAGE_DEPLOYMENT_RATES.items() if k in (1, 2, 3)}
-    bt_fee_bps = 1.0
-    bt_slippage_bps = 2.0
-    bt_current_vol_factor = estimate_vol_factor(qqqm_data['df'])
-    bt_result = run_backtest(
-        qqqm_data['df'][['Open', 'Close', 'SMA_50', 'SMA_100', 'SMA_200']].copy(),
-        initial_cash=10000.0,
-        stage_rates=bt_stage_rates,
-        vol_adjust=backtest_vol_adjust,
-        buy_only=True,
-        fee_bps=bt_fee_bps,
-        slippage_bps=bt_slippage_bps,
-    )
-
-    st.markdown("---")
-    st.header("백테스트 (실험)")
-    st.caption("규칙: 신호는 D일 종가에 계산되고, D+1일 시가에 체결됩니다. 수수료 1bp, 슬리피지 2bp를 적용합니다.")
-    st.markdown(f"""
-    <div class="info-box">
-        <div class="warning-title">가정</div>
-        <p>신호 시점: D일 종가 기준 계산</p>
-        <p>체결 시점: D+1일 시가 체결 (다음 거래일)</p>
-        <p>4단계: 다음 거래일 시가에 잔여 현금 전액 투입</p>
-        <p>단계별 비율(1/2/3): {bt_stage_rates} | 4단계: 100%</p>
-        <p>변동성 보정: {'활성화' if backtest_vol_adjust else '비활성화'}</p>
-        <p>수수료(bps): {bt_fee_bps:.1f} | 슬리피지(bps): {bt_slippage_bps:.1f}</p>
-        <p>체결 모드: 롱 전용, 매수 전용</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if backtest_vol_adjust:
-        st.caption(f"현재 추정 변동성 계수(QQQM): {bt_current_vol_factor:.2f}")
-
-    metrics_rows = [
-        {"지표": "CAGR", "값": f"{bt_result.metrics.get('CAGR', 0.0) * 100:.2f}%"},
-        {"지표": "총 수익률", "값": f"{bt_result.metrics.get('TotalReturn', 0.0) * 100:.2f}%"},
-        {"지표": "비교군 수익률", "값": f"{bt_result.metrics.get('BenchmarkTotalReturn', 0.0) * 100:.2f}%"},
-        {"지표": "최대 낙폭(MDD)", "값": f"{bt_result.metrics.get('MDD', 0.0) * 100:.2f}%"},
-        {"지표": "연환산 변동성", "값": f"{bt_result.metrics.get('Volatility', 0.0) * 100:.2f}%"},
-        {"지표": "샤프 지수", "값": f"{bt_result.metrics.get('Sharpe', 0.0):.2f}"},
-        {"지표": "거래 횟수", "값": f"{int(bt_result.metrics.get('NumTrades', 0))}"},
-        {"지표": "최대 낙폭 구간", "값": str(bt_result.metrics.get('MaxDD_start_end', None))},
-    ]
-    st.dataframe(pd.DataFrame(metrics_rows), width='stretch', hide_index=True)
-
-    if not bt_result.equity_curve.empty:
-        fig_bt = go.Figure()
-        fig_bt.add_trace(go.Scatter(
-            x=bt_result.equity_curve.index,
-            y=bt_result.equity_curve.values,
-            mode='lines',
-            name='전략 누적 자산',
-            line=dict(color='#10b981', width=2),
-        ))
-        if not bt_result.benchmark_curve.empty:
-            fig_bt.add_trace(go.Scatter(
-                x=bt_result.benchmark_curve.index,
-                y=bt_result.benchmark_curve.values,
-                mode='lines',
-                name='비교군(매수 후 보유)',
-                line=dict(color='#3b82f6', width=2, dash='dash'),
-            ))
-        fig_bt.update_layout(
-            plot_bgcolor='rgba(30, 41, 59, 0.5)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='#e2e8f0'),
-            xaxis=dict(gridcolor='rgba(148, 163, 184, 0.2)', showgrid=True),
-            yaxis=dict(gridcolor='rgba(148, 163, 184, 0.2)', showgrid=True, title='누적 자산 (USD)'),
-            height=320,
-            hovermode='x unified',
-            margin=dict(l=40, r=20, t=20, b=20),
-        )
-        st.plotly_chart(fig_bt, width='stretch', config={'displayModeBar': False})
-
-        if not bt_result.trades.empty:
-            latest_n = 20
-            st.caption(f"거래: {len(bt_result.trades)} | 최근 {latest_n}")
-            trades_view = bt_result.trades.sort_values("exec_date", ascending=False).head(latest_n).copy()
-            trades_view["signal_date"] = pd.to_datetime(trades_view["signal_date"]).dt.strftime("%Y-%m-%d")
-            trades_view["exec_date"] = pd.to_datetime(trades_view["exec_date"]).dt.strftime("%Y-%m-%d")
-            trades_view["action"] = trades_view["action"].map(lambda x: "매수" if x == "BUY" else str(x))
-            trades_view["planned_cash"] = trades_view["planned_cash"].map(fmt_money)
-            trades_view["fee"] = trades_view["fee"].map(fmt_money)
-            trades_view["exec_price"] = trades_view["exec_price"].map(fmt_money)
-            trades_view["shares_bought"] = trades_view["shares_bought"].map(lambda x: fmt_num(x, 2))
-            trades_view["cash_after"] = trades_view["cash_after"].map(fmt_money)
-            trades_view["shares_after"] = trades_view["shares_after"].map(lambda x: fmt_num(x, 2))
-            if "vol_factor" in trades_view.columns:
-                trades_view["vol_factor"] = trades_view["vol_factor"].map(lambda x: fmt_num(x, 2) if x is not None else "-")
-            trades_view = trades_view.rename(
-                columns={
-                    "signal_date": "신호 일자",
-                    "exec_date": "체결 일자",
-                    "stage": "단계",
-                    "action": "동작",
-                    "planned_cash": "계획 현금",
-                    "fee": "수수료",
-                    "exec_price": "체결 가격",
-                    "shares_bought": "매수 수량",
-                    "cash_after": "체결 후 현금",
-                    "shares_after": "체결 후 수량",
-                    "vol_factor": "변동성 계수",
-                    "reason": "판단 근거",
-                }
-            )
-            trades_view = trades_view[
-                ["신호 일자", "체결 일자", "단계", "동작", "계획 현금", "수수료", "체결 가격", "매수 수량", "체결 후 수량", "체결 후 현금", "변동성 계수", "판단 근거"]
-            ]
-            st.dataframe(
-                trades_view,
-                width='stretch',
-                hide_index=True,
-            )
-
-st.markdown("---")
-st.header("전략 연구실")
-st.caption("연구 모드: 단일 실행, 현금 비중 연구, 쿨다운 민감도, 다중 자산 검증")
-
-lab_modes = ["단일 실행", "현금 비중 연구", "쿨다운 연구", "다중 자산 검증"]
-lab_mode = st.selectbox("연구 모드", lab_modes, index=0)
-
-lab_col1, lab_col2, lab_col3 = st.columns(3)
-with lab_col1:
-    lab_symbol = st.selectbox("종목", ["QQQM", "SPY", "VTI", "BTC-USD"], index=0)
-with lab_col2:
-    lab_start_date = st.date_input("시작일", value=pd.Timestamp("2012-01-01").date())
-with lab_col3:
-    lab_initial_cash = st.number_input("초기 자본 (USD)", min_value=1000.0, value=10000.0, step=1000.0)
-
-lab_assets = st.multiselect("다중 자산 세트", ["QQQM", "SPY", "VTI", "BTC-USD"], default=["QQQM", "SPY", "VTI", "BTC-USD"])
-
-ctrl_col1, ctrl_col2 = st.columns(2)
-with ctrl_col1:
-    lab_cash_ratio = st.slider("현금 비중", min_value=0.05, max_value=0.30, value=0.10, step=0.01)
-with ctrl_col2:
-    lab_cooldown = st.slider("쿨다운 일수", min_value=10, max_value=60, value=30, step=1)
-
-with st.expander("단계별 투입 비율 (1/2/3)", expanded=False):
-    rate_col1, rate_col2, rate_col3 = st.columns(3)
-    with rate_col1:
-        lab_rate_1 = st.slider("1단계 비율", min_value=0.0, max_value=1.0, value=float(STAGE_DEPLOYMENT_RATES[1]), step=0.01)
-    with rate_col2:
-        lab_rate_2 = st.slider("2단계 비율", min_value=0.0, max_value=1.0, value=float(STAGE_DEPLOYMENT_RATES[2]), step=0.01)
-    with rate_col3:
-        lab_rate_3 = st.slider("3단계 비율", min_value=0.0, max_value=1.0, value=float(STAGE_DEPLOYMENT_RATES[3]), step=0.01)
-
-crisis_period = st.selectbox("급락장 분석 (선택)", ["없음", "2008", "2020", "2022"], index=0)
-
-lab_stage_rates = {1: float(lab_rate_1), 2: float(lab_rate_2), 3: float(lab_rate_3)}
-rate_sum = lab_rate_1 + lab_rate_2 + lab_rate_3
-if rate_sum > 1.0:
-    st.error(f"단계별 투입 비율 합계는 1.0 이하여야 합니다 (현재: {rate_sum:.2f})")
-
-
-def _apply_crisis_filter(df: pd.DataFrame, period_label: str) -> pd.DataFrame:
-    if period_label == "없음":
-        return df
-    ranges = {
-        "2008": ("2008-01-01", "2009-12-31"),
-        "2020": ("2020-01-01", "2020-12-31"),
-        "2022": ("2022-01-01", "2022-12-31"),
-    }
-    start_s, end_s = ranges[period_label]
-    s_ts = pd.Timestamp(start_s)
-    e_ts = pd.Timestamp(end_s)
-    if len(df) > 0 and isinstance(df["date"].iloc[0], pd.Timestamp) and df["date"].iloc[0].tzinfo is not None:
-        s_ts = s_ts.tz_localize(df["date"].iloc[0].tz)
-        e_ts = e_ts.tz_localize(df["date"].iloc[0].tz)
-    out = df[(df["date"] >= s_ts) & (df["date"] <= e_ts)].copy()
-    return out
-
-
-lab_run = st.button("전략 연구 실행", width='stretch')
-
-if lab_run and rate_sum <= 1.0:
-    export_df = None
-
-    def _run_one(symbol: str, cooldown_days: int, cash_ratio: float):
-        out = run_strategy_backtest(
-            symbol=symbol,
-            start_date=str(lab_start_date),
-            initial_cash=float(lab_initial_cash),
-            cooldown_days=int(cooldown_days),
-            stage_rates=lab_stage_rates,
-            cash_ratio=float(cash_ratio),
-        )
-        out = _apply_crisis_filter(out, crisis_period)
-        if out.empty:
-            raise ValueError(f"급락장 필터 적용 후 데이터가 없습니다 ({crisis_period})")
-        return out
-
-    if lab_mode == "단일 실행":
-        with st.spinner("전략 백테스트 실행 중..."):
-            lab_df = _run_one(lab_symbol, lab_cooldown, lab_cash_ratio)
-            lab_metrics = compute_backtest_metrics(lab_df)
-
-        mcol1, mcol2, mcol3, mcol4, mcol5 = st.columns(5)
-        mcol1.metric("총 수익률", f"{lab_metrics['Total Return'] * 100:.2f}%")
-        mcol2.metric("CAGR", f"{lab_metrics['CAGR'] * 100:.2f}%")
-        mcol3.metric("최대 낙폭", f"{lab_metrics['Max Drawdown'] * 100:.2f}%")
-        mcol4.metric("변동성", f"{lab_metrics['Volatility'] * 100:.2f}%")
-        mcol5.metric("Sharpe", f"{lab_metrics['Sharpe Ratio']:.2f}")
-
-        compare_df = pd.DataFrame(
-            [
-                {"구분": "전략", "수익률": f"{lab_metrics['strategy_return'] * 100:.2f}%"},
-                {"구분": "매수 후 보유", "수익률": f"{lab_metrics['buy_hold_return'] * 100:.2f}%"},
-            ]
-        )
-        st.dataframe(compare_df, width='stretch', hide_index=True)
-
-        st.plotly_chart(plot_backtest_results(lab_df), width='stretch', config={"displayModeBar": False})
-
-        deploy_df = lab_df[lab_df["deploy_cash"] > 0].copy()
-        fig_dep = go.Figure()
-        fig_dep.add_trace(go.Bar(x=deploy_df["date"], y=deploy_df["deploy_cash"], name="투입 현금", marker_color="#f59e0b"))
-        fig_dep.update_layout(height=260, yaxis=dict(title="투입 현금 (USD)"), hovermode="x unified", margin=dict(l=40, r=20, t=20, b=20))
-        st.plotly_chart(fig_dep, width='stretch', config={"displayModeBar": False})
-
-        st.caption(f"행 수={len(lab_df)} | 종목={lab_symbol} | 쿨다운={lab_cooldown} | 현금비중={lab_cash_ratio:.2f} | 비율={lab_stage_rates} | 위기구간={crisis_period}")
-        export_df = lab_df.copy()
-
-    elif lab_mode == "현금 비중 연구":
-        cash_grid = [0.05, 0.10, 0.20, 0.30]
-        rows = []
-        with st.spinner("현금 비중 연구 실행 중..."):
-            for cr in cash_grid:
-                run_df = _run_one(lab_symbol, lab_cooldown, cr)
-                m = compute_backtest_metrics(run_df)
-                rows.append(
-                    {
-                        "현금 비중": cr,
-                        "CAGR": m["CAGR"],
-                        "Sharpe": m["Sharpe Ratio"],
-                        "최대 낙폭": m["Max Drawdown"],
-                        "총 수익률": m["Total Return"],
-                    }
-                )
-        cash_df = pd.DataFrame(rows)
-        show_cash_df = cash_df.copy()
-        show_cash_df["CAGR"] = show_cash_df["CAGR"].map(lambda x: f"{x * 100:.2f}%")
-        show_cash_df["최대 낙폭"] = show_cash_df["최대 낙폭"].map(lambda x: f"{x * 100:.2f}%")
-        show_cash_df["총 수익률"] = show_cash_df["총 수익률"].map(lambda x: f"{x * 100:.2f}%")
-        st.dataframe(show_cash_df, width='stretch', hide_index=True)
-        export_df = cash_df
-
-    elif lab_mode == "쿨다운 연구":
-        cooldown_grid = [10, 20, 30, 40, 60]
-        rows = []
-        with st.spinner("쿨다운 민감도 분석 실행 중..."):
-            for cd in cooldown_grid:
-                run_df = _run_one(lab_symbol, cd, lab_cash_ratio)
-                m = compute_backtest_metrics(run_df)
-                rows.append(
-                    {
-                        "쿨다운": cd,
-                        "CAGR": m["CAGR"],
-                        "Sharpe": m["Sharpe Ratio"],
-                        "최대 낙폭": m["Max Drawdown"],
-                        "총 수익률": m["Total Return"],
-                    }
-                )
-        cooldown_df = pd.DataFrame(rows)
-        st.dataframe(cooldown_df, width='stretch', hide_index=True)
-
-        fig_cd = go.Figure()
-        fig_cd.add_trace(go.Scatter(x=cooldown_df["쿨다운"], y=cooldown_df["CAGR"], mode="lines+markers", name="CAGR", line=dict(color="#10b981")))
-        fig_cd.add_trace(go.Scatter(x=cooldown_df["쿨다운"], y=cooldown_df["총 수익률"], mode="lines+markers", name="총 수익률", line=dict(color="#3b82f6")))
-        fig_cd.add_trace(go.Scatter(x=cooldown_df["쿨다운"], y=cooldown_df["Sharpe"], mode="lines+markers", name="Sharpe", line=dict(color="#f59e0b"), yaxis="y2"))
-        fig_cd.update_layout(
-            height=320,
-            xaxis=dict(title="쿨다운 일수"),
-            yaxis=dict(title="수익률", tickformat=".1%"),
-            yaxis2=dict(title="Sharpe", overlaying="y", side="right"),
-            hovermode="x unified",
-            margin=dict(l=40, r=40, t=20, b=20),
-        )
-        st.plotly_chart(fig_cd, width='stretch', config={"displayModeBar": False})
-        export_df = cooldown_df
-
-    else:  # MULTI-ASSET VALIDATION
-        if not lab_assets:
-            st.warning("최소 1개 자산을 선택하세요.")
-        else:
-            rows = []
-            with st.spinner("다중 자산 검증 실행 중..."):
-                for sym in lab_assets:
-                    run_df = _run_one(sym, lab_cooldown, lab_cash_ratio)
-                    m = compute_backtest_metrics(run_df)
-                    rows.append(
-                        {
-                            "자산": sym,
-                            "CAGR": m["CAGR"],
-                            "Sharpe": m["Sharpe Ratio"],
-                            "최대 낙폭": m["Max Drawdown"],
-                            "전략 수익률": m["strategy_return"],
-                            "매수후보유 수익률": m["buy_hold_return"],
-                        }
-                    )
-            multi_df = pd.DataFrame(rows)
-            show_multi_df = multi_df.copy()
-            for col in ["CAGR", "최대 낙폭", "전략 수익률", "매수후보유 수익률"]:
-                show_multi_df[col] = show_multi_df[col].map(lambda x: f"{x * 100:.2f}%")
-            st.dataframe(show_multi_df, width='stretch', hide_index=True)
-            export_df = multi_df
-
-    if export_df is not None and not export_df.empty:
-        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button(
-            "연구 결과 내보내기",
-            data=csv_bytes,
-            file_name=f"strategy_lab_{lab_mode.lower().replace(' ', '_')}.csv",
-            mime="text/csv",
-            width='stretch',
-        )
-
-st.markdown("---")
-st.header("📊 FIRE 시뮬레이터")
-st.caption("과거 수익률을 기반으로 미래 포트폴리오 경로를 부트스트랩하여 장기 FIRE 달성 가능성을 추정합니다.")
-
-mc_col1, mc_col2, mc_col3 = st.columns(3)
-with mc_col1:
-    mc_symbol = st.selectbox("시뮬레이션 종목", ["QQQM", "SPY", "VTI", "BTC-USD"], index=0)
-with mc_col2:
-    mc_start_date = st.date_input("시뮬레이션 수익률 시작일", value=pd.Timestamp("2012-01-01").date())
-with mc_col3:
-    mc_years = st.slider("투자 기간 (년)", min_value=5, max_value=40, value=20, step=1)
-
-mc_col4, mc_col5, mc_col6 = st.columns(3)
-with mc_col4:
-    mc_initial = st.number_input("초기 자본", min_value=1000.0, value=max(total_value, 10000.0), step=1000.0)
-with mc_col5:
-    mc_annual_inv = st.number_input("연간 투자금", min_value=0.0, value=12000.0, step=1000.0)
-with mc_col6:
-    mc_target = st.number_input("목표 FIRE 자본", min_value=10000.0, value=1000000.0, step=10000.0)
-
-mc_simulations = st.slider("시뮬레이션 수", min_value=200, max_value=5000, value=1000, step=100)
-mc_run = st.button("FIRE 시뮬레이션 실행", width='stretch')
-
-if mc_run:
-    with st.spinner("몬테카를로 FIRE 시뮬레이션 실행 중..."):
-        hist_df = run_strategy_backtest(
-            symbol=mc_symbol,
-            start_date=str(mc_start_date),
-            initial_cash=10000.0,
-            cooldown_days=30,
-            stage_rates={1: float(STAGE_DEPLOYMENT_RATES[1]), 2: float(STAGE_DEPLOYMENT_RATES[2]), 3: float(STAGE_DEPLOYMENT_RATES[3])},
-            cash_ratio=0.10,
-        )
-        hist_returns = pd.to_numeric(hist_df["portfolio_value"], errors="coerce").pct_change().dropna().values
-
-        sim_paths = simulate_monte_carlo_with_contributions(
-            returns=hist_returns,
-            years=int(mc_years),
-            simulations=int(mc_simulations),
-            initial_capital=float(mc_initial),
-            annual_investment=float(mc_annual_inv),
-        )
-
-        mc_stats = compute_monte_carlo_statistics(sim_paths, initial_capital=float(mc_initial), years=int(mc_years))
-        fire_prob = calculate_fire_probability(sim_paths, target_value=float(mc_target))
-
-    sc1, sc2, sc3, sc4 = st.columns(4)
-    sc1.metric("최종 중앙값", f"${mc_stats['median_final_value']:,.0f}")
-    sc2.metric("5백분위", f"${mc_stats['5th_percentile']:,.0f}")
-    sc3.metric("95백분위", f"${mc_stats['95th_percentile']:,.0f}")
-    sc4.metric("FIRE 달성 확률", f"{fire_prob * 100:.1f}%")
-
-    st.plotly_chart(plot_monte_carlo(sim_paths), width='stretch', config={"displayModeBar": False})
-
-    final_values = sim_paths.iloc[-1].astype(float)
-    fig_dist = go.Figure()
-    fig_dist.add_trace(
-        go.Histogram(
-            x=final_values.values,
-            nbinsx=50,
-            marker_color="#3b82f6",
-            opacity=0.85,
-            name="최종 자산",
-        )
-    )
-    fig_dist.add_vline(x=float(mc_target), line_color="#ef4444", line_dash="dash", annotation_text="FIRE 목표")
-    fig_dist.update_layout(
-        height=300,
-        xaxis=dict(title="최종 포트폴리오 가치 (USD)", gridcolor="rgba(148, 163, 184, 0.2)"),
-        yaxis=dict(title="건수", gridcolor="rgba(148, 163, 184, 0.2)"),
-        plot_bgcolor="rgba(30, 41, 59, 0.5)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#e2e8f0"),
-        margin=dict(l=40, r=20, t=20, b=20),
-    )
-    st.plotly_chart(fig_dist, width='stretch', config={"displayModeBar": False})
-
-    export_sim = sim_paths.copy()
-    export_sim.insert(0, "day", export_sim.index)
-    st.download_button(
-        "시뮬레이션 결과 CSV 내보내기",
-        data=export_sim.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"fire_simulator_{mc_symbol}_{mc_years}y_{mc_simulations}sims.csv",
-        mime="text/csv",
-        width='stretch',
-    )
-
-st.markdown("---")
-
-# =====================================================================
-# Execution plan status
-# =====================================================================
-st.header("실행 계획")
-status_lines = []
-
-if defcon_triggered:
-    status_lines.append("DEFCON 세이빙 발동: 신규 자금을 SGOV로만 배분")
-
-if puddle_alert:
-    deploy_base = float(sgov_value + cash_deposit)
-    deploy_amount = compute_deployment(puddle_stage, deploy_base)
-    status_lines.append(
-        f"웅덩이 단계 {puddle_stage} 신호: 기준자금=${deploy_base:,.2f}, 권장 투입액=${deploy_amount:,.2f}"
-    )
-elif puddle_cooldown_active:
-    status_lines.append(f"웅덩이 쿨다운 진행 중: {cooldown_info if cooldown_info else '최근 30일 이내 신호 발생'}")
-
-if smart_shoulder_triggered:
-    status_lines.append("스마트 숄더 발동: 리밸런싱 필요")
-elif rebalancing_needed:
-    missing_text = " / ".join(shoulder_eval.get("reasons", [])) if shoulder_eval.get("reasons") else "추가 조건 필요"
-    status_lines.append(f"⚠️ QQQM 77% 초과 대기: {missing_text}")
-
-if not status_lines:
-    status_lines.append("핵심 전략 정상 운용 중")
-
-for line in status_lines:
-    st.markdown(f"- {line}")
-
-if new_cash > 0:
-    st.caption(f"신규 자금: ${new_cash:,.2f} | 목표 비중: 72/16/2/10")
-
-st.markdown("---")
-
-# =====================================================================
-# Footer separator
-# =====================================================================
-st.markdown("---")
-
-# =====================================================================
-# Portfolio market-driver analysis
-# =====================================================================
-st.header("오늘의 시장 동인")
-
-@st.cache_data(ttl=1800)  # 30-minute cache
-def get_market_summary(symbol):
-    """Fetch symbol-specific headline list from Yahoo Finance RSS."""
-    news_list = []
-    try:
-        feed_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
-        response = requests.get(feed_url, timeout=10)
-        if response.status_code != 200:
-            return news_list
-
-        root = ET.fromstring(response.content)
-        for item in root.findall('.//item')[:5]:
-            title = (item.findtext('title') or '').strip()
-            if not title:
-                continue
-            news_list.append({
-                'title': title,
-                'publisher': (item.findtext('source') or 'Yahoo Finance').strip(),
-                'link': (item.findtext('link') or '#').strip(),
-            })
-
-        return news_list
-    except Exception:
-        return news_list
-
-def get_broader_market_news():
-    """Fetch broader market headlines (RSS-based fallback)."""
-    all_news = []
-    for symbol in ['SPY', 'QQQ', '^GSPC']:
-        try:
-            symbol_news = get_market_summary(symbol)
-            for item in symbol_news[:3]:
-                title = item.get('title', '')
-                if title and title not in [n['title'] for n in all_news]:
-                    all_news.append(item)
-        except:
-            continue
-    return all_news[:5]
-
-def analyze_market_sentiment(change_pct, news_list):
-    """Analyze market sentiment factors from price change and headlines."""
-    
-    # Sentiment keyword categories
-    keyword_categories = {
-        'Policy/Rates': {
-            'keywords': ['fed', 'federal', 'reserve', 'rate', 'rates', 'interest', 'powell', 'fomc', 'cut', 'hike', 'dovish', 'hawkish', 'monetary', 'treasury', 'yield', 'bond'],
-            'positive': ['cut', 'dovish', 'lower', 'ease', 'pause'],
-            'negative': ['hike', 'hawkish', 'higher', 'raise', 'surge']
-        },
-        'Earnings/Companies': {
-            'keywords': ['earnings', 'revenue', 'profit', 'guidance', 'beat', 'miss', 'outlook', 'forecast', 'results', 'quarter', 'q1', 'q2', 'q3', 'q4', 'eps', 'sales'],
-            'positive': ['beat', 'strong', 'surge', 'record', 'exceeded', 'top', 'raise'],
-            'negative': ['miss', 'weak', 'disappoint', 'below', 'cut', 'lower', 'warn']
-        },
-        'AI/기술': {
-            'keywords': ['ai', 'artificial', 'intelligence', 'nvidia', 'nvda', 'chip', 'chips', 'semiconductor', 'tech', 'apple', 'aapl', 'microsoft', 'msft', 'google', 'googl', 'amazon', 'amzn', 'meta', 'tesla', 'tsla', 'software', 'cloud', 'data', 'center'],
-            'positive': ['surge', 'boom', 'growth', 'demand', 'breakthrough', 'rally', 'soar', 'jump'],
-            'negative': ['concern', 'bubble', 'overvalued', 'decline', 'fall', 'drop', 'selloff']
-        },
-        'Inflation': {
-            'keywords': ['inflation', 'cpi', 'pce', 'price', 'consumer', 'cost', 'spending'],
-            'positive': ['cool', 'ease', 'slow', 'lower', 'decline', 'fall', 'drop'],
-            'negative': ['rise', 'hot', 'sticky', 'higher', 'surge', 'jump', 'accelerate']
-        },
-        'Geopolitics/Trade': {
-            'keywords': ['tariff', 'china', 'chinese', 'trade', 'war', 'geopolitical', 'russia', 'ukraine', 'sanction', 'tension', 'europe', 'asia', 'import', 'export', 'trump', 'biden'],
-            'positive': ['deal', 'ease', 'resolve', 'agreement', 'peace', 'relief'],
-            'negative': ['tension', 'escalate', 'threat', 'risk', 'war', 'tariff', 'sanction', 'conflict']
-        },
-        '경기/고용': {
-            'keywords': ['job', 'jobs', 'employment', 'gdp', 'economy', 'economic', 'recession', 'growth', 'labor', 'unemployment', 'payroll', 'hire', 'hiring', 'layoff', 'worker'],
-            'positive': ['strong', 'growth', 'add', 'robust', 'resilient', 'expand', 'hire'],
-            'negative': ['weak', 'slow', 'recession', 'layoff', 'decline', 'contract', 'cut']
-        },
-        '안전자산': {
-            'keywords': ['gold', 'silver', 'safe', 'haven', 'precious', 'metal', 'commodity', 'oil', 'crude', 'energy'],
-            'positive': ['rally', 'surge', 'demand', 'rise', 'gain', 'climb', 'high'],
-            'negative': ['fall', 'drop', 'decline', 'sell', 'low', 'slide', 'tumble']
-        },
-        '시장 심리': {
-            'keywords': ['rally', 'selloff', 'sell-off', 'bull', 'bear', 'volatility', 'vix', 'fear', 'optimism', 'sentiment', 'investor', 'market', 'stock', 'stocks', 'wall', 'street', 'dow', 'nasdaq', 's&p', 'index'],
-            'positive': ['rally', 'bull', 'optimism', 'confidence', 'buy', 'gain', 'rise', 'surge', 'record', 'high'],
-            'negative': ['selloff', 'sell-off', 'bear', 'fear', 'panic', 'sell', 'crash', 'plunge', 'tumble', 'drop', 'fall', 'low']
-        }
-    }
-    
-    all_titles = ' '.join([n['title'] for n in news_list]).lower() if news_list else ''
-    
-    detected_factors = []
-    
-    for category, data in keyword_categories.items():
-        # Category keyword matching
-        category_found = False
-        matched_keyword = None
-        for kw in data['keywords']:
-            if kw in all_titles:
-                category_found = True
-                matched_keyword = kw
-                break
-        
-        if category_found:
-            # Determine sentiment direction
-            sentiment = 'neutral'
-            for pos_kw in data['positive']:
-                if pos_kw in all_titles:
-                    sentiment = 'positive'
-                    break
-            if sentiment == 'neutral':
-                for neg_kw in data['negative']:
-                    if neg_kw in all_titles:
-                        sentiment = 'negative'
-                        break
-            
-            detected_factors.append({
-                'category': category,
-                'sentiment': sentiment,
-                'keyword': matched_keyword
-            })
-    
-    return detected_factors
-
-def get_market_interpretation(symbol, name, change_pct, news_list):
-    """Build integrated market interpretation block."""
-    
-    factors = analyze_market_sentiment(change_pct, news_list)
-    
-    # 현재가 direction
-    if change_pct > 1.0:
-        direction = "강한 상승"
-        direction_detail = "상승 모멘텀 확대"
-    elif change_pct > 0.3:
-        direction = "상승"
-        direction_detail = "완만한 상승"
-    elif change_pct > -0.3:
-        direction = "보합"
-        direction_detail = "제한적 움직임"
-    elif change_pct > -1.0:
-        direction = "하락"
-        direction_detail = "완만한 하락"
-    else:
-        direction = "강한 하락"
-        direction_detail = "하방 압력 확대"
-    
-    # Key factors (up to 3)
-    main_factors = []
-    for f in factors[:3]:
-        sentiment_icon = "+" if f['sentiment'] == 'positive' else ("-" if f['sentiment'] == 'negative' else "=")
-        main_factors.append(f"{sentiment_icon} {f['category']}")
-    
-    # Fallback factors when news-based signals are sparse
-    if not main_factors:
-        if symbol == 'QQQM':
-            if change_pct > 0.5:
-                main_factors = ["+ 기술주 주도", "+ AI/반도체 수요"]
-            elif change_pct < -0.5:
-                main_factors = ["- 기술주 약세", "- 금리 부담 우려"]
-            else:
-                main_factors = ["= 기술주 혼조", "= 방향성 불명확"]
-        elif symbol == 'SCHD':
-            if change_pct > 0.5:
-                main_factors = ["+ 배당주 강세", "+ 방어주 선호"]
-            elif change_pct < -0.5:
-                main_factors = ["- 배당주 약세", "- 성장주 로테이션"]
-            else:
-                main_factors = ["= 배당주 횡보", "= 배당수익 안정"]
-        elif symbol == 'IAU':
-            if change_pct > 0.5:
-                main_factors = ["+ 금 강세", "+ 안전자산 수요", "+ 달러 약세"]
-            elif change_pct < -0.5:
-                main_factors = ["- 금 약세", "- 위험선호 로테이션", "- 달러 강세"]
-            else:
-                main_factors = ["= 금 횡보", "= 관망 흐름"]
-        else:
-            if change_pct > 0.5:
-                main_factors = ["+ 시장 강세", "+ 매수 유입"]
-            elif change_pct < -0.5:
-                main_factors = ["- 시장 약세", "- 매도 압력"]
-            else:
-                main_factors = ["= 방향성 불명확", "= 관망 흐름"]
-    
-    return {
-        'direction': direction,
-        'direction_detail': direction_detail,
-        'factors': main_factors,
-        'news': news_list[:2] if news_list else []  # Top 2 headlines
-    }
-
-# Gather analysis inputs
-with st.spinner('시장 동인 분석 중...'):
-    qqqm_news = get_market_summary('QQQM')
-    schd_news = get_market_summary('SCHD')
-    iau_news = get_market_summary('IAU')
-    
-    # Use broader market headlines when symbol feed is sparse.
-    market_news = None
-    if not qqqm_news or not schd_news or not iau_news:
-        market_news = get_broader_market_news()
-    
-    if not qqqm_news:
-        qqqm_news = market_news or []
-    if not schd_news:
-        schd_news = market_news or []
-    if not iau_news:
-        iau_news = market_news or []
-    
-    qqqm_analysis = get_market_interpretation('QQQM', '나스닥 100', qqqm_data['change_pct'], qqqm_news)
-    schd_analysis = get_market_interpretation('SCHD', '배당 성장', schd_data['change_pct'], schd_news)
-    iau_analysis = get_market_interpretation('IAU', '금', iau_data['change_pct'], iau_news)
-
-# =====================================================================
-# Portfolio summary (top placement)
-# =====================================================================
-portfolio_change = (
-    (qqqm_data['change_pct'] * 0.72) + 
-    (schd_data['change_pct'] * 0.16) + 
-    (iau_data['change_pct'] * 0.02)
-)
-portfolio_daily_change = total_value * (portfolio_change / 100)
-
-# Color mapping (up=red, down=blue)
-port_color = "#ef4444" if portfolio_change >= 0 else "#3b82f6"
-port_bg = "rgba(239, 68, 68, 0.05)" if portfolio_change >= 0 else "rgba(59, 130, 246, 0.05)"
-port_icon = "📈" if portfolio_change >= 0 else "📉"
-
-# Build market sentiment summary
-def generate_market_summary():
-    # Aggregate unique factors
-    all_factors = []
-    for analysis in [qqqm_analysis, schd_analysis, iau_analysis]:
-        for f in analysis['factors']:
-            if f not in all_factors:
-                all_factors.append(f)
-    
-    # Market mood by portfolio daily change
-    if portfolio_change > 1.5:
-        market_mood = "강한 상승"
-        mood_emoji = "BULL"
-    elif portfolio_change > 0.5:
-        market_mood = "상승"
-        mood_emoji = "UP"
-    elif portfolio_change > -0.5:
-        market_mood = "중립"
-        mood_emoji = "NEUTRAL"
-    elif portfolio_change > -1.5:
-        market_mood = "하락"
-        mood_emoji = "DOWN"
-    else:
-        market_mood = "강한 하락"
-        mood_emoji = "BEAR"
-    
-    # Extract top-2 key issues
-    key_issues = []
-    for f in all_factors[:2]:
-        # Strip factor sign prefixes
-        issue = f.replace("+ ", "").replace("- ", "").replace("= ", "")
-        key_issues.append(issue)
-    
-    if key_issues:
-        return f"{mood_emoji} {market_mood} | 주요 이슈: {', '.join(key_issues)}"
-    else:
-        return f"{mood_emoji} {market_mood}"
-
-market_summary_text = generate_market_summary()
-
-# Portfolio summary cards
-col1, col2, col3 = st.columns([2, 2, 3])
-
-with col1:
-    st.markdown(f"""
-    <div style="background: #1e293b; 
-                border: 2px solid {port_color}; border-radius: 12px; padding: 20px; text-align: center;">
-        <p style="color: #cbd5e1; font-size: 0.9em; margin: 0 0 8px 0;">오늘 수익률</p>
-        <p style="color: {port_color}; font-size: 2.4em; font-weight: 800; margin: 0;">
-            {port_icon} {portfolio_change:+.2f}%
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col2:
-    st.markdown(f"""
-    <div style="background: #1e293b; 
-                border: 2px solid {port_color}; border-radius: 12px; padding: 20px; text-align: center;">
-        <p style="color: #cbd5e1; font-size: 0.9em; margin: 0 0 8px 0;">예상 손익</p>
-        <p style="color: {port_color}; font-size: 2.4em; font-weight: 800; margin: 0;">
-            {'+' if portfolio_daily_change >= 0 else ''}${portfolio_daily_change:,.2f}
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col3:
-    st.markdown(f"""
-    <div style="background: #1e293b; 
-                border: 2px solid #10b981; border-radius: 12px; padding: 20px;">
-        <p style="color: #10b981; font-size: 0.9em; margin: 0 0 10px 0; font-weight: 600;">시장 심리 요약</p>
-        <p style="color: #f1f5f9; font-size: 1.15em; font-weight: 700; margin: 0; line-height: 1.5;">
-            {market_summary_text}
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-# Weight contribution details
-st.markdown(f"""
-<div style="background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 12px 15px; margin-top: 15px;">
-    <p style="color: #e2e8f0; font-size: 0.95em; margin: 0; text-align: center;">
-        <span style="color: #10b981; font-weight: 600;">QQQM</span> {qqqm_data['change_pct']:+.2f}% x 72% &nbsp;&nbsp;|&nbsp;&nbsp; 
-        <span style="color: #3b82f6; font-weight: 600;">SCHD</span> {schd_data['change_pct']:+.2f}% x 16% &nbsp;&nbsp;|&nbsp;&nbsp; 
-        <span style="color: #fbbf24; font-weight: 600;">IAU</span> {iau_data['change_pct']:+.2f}% x 2%
-    </p>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-# =====================================================================
-# Asset detail analysis
-# =====================================================================
-st.subheader("📊 자산 상세 분석")
-
-# QQQM 遺꾩꽍
-qqqm_color = "#ef4444" if qqqm_data['change_pct'] >= 0 else "#3b82f6"
-qqqm_icon = "📈" if qqqm_data['change_pct'] >= 0 else "📉"
-
-with st.expander(f"🟢 **QQQM (나스닥 100)** - {qqqm_icon} {qqqm_data['change_pct']:+.2f}% (${qqqm_data['price']:.2f})", expanded=True):
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        st.markdown(f"""
-        <div style="text-align: center; padding: 15px; background: rgba(16, 185, 129, 0.1); border-radius: 12px;">
-            <p style="color: #10b981; font-size: 0.9em; margin: 0;">오늘 방향성</p>
-            <p style="color: {qqqm_color}; font-size: 1.8em; font-weight: 700; margin: 5px 0;">{qqqm_analysis['direction']}</p>
-            <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">{qqqm_analysis['direction_detail']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("**주요 요인**")
-        for factor in qqqm_analysis['factors']:
-            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;{factor}")
-        
-        if qqqm_analysis['news']:
-            st.markdown("**관련 뉴스**")
-            for news in qqqm_analysis['news']:
-                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;[{news['title'][:50]}...]({news['link']})")
-
-# SCHD 遺꾩꽍
-schd_color = "#ef4444" if schd_data['change_pct'] >= 0 else "#3b82f6"
-schd_icon = "📈" if schd_data['change_pct'] >= 0 else "📉"
-
-with st.expander(f"🔵 **SCHD (배당 성장)** - {schd_icon} {schd_data['change_pct']:+.2f}% (${schd_data['price']:.2f})", expanded=True):
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        st.markdown(f"""
-        <div style="text-align: center; padding: 15px; background: rgba(59, 130, 246, 0.1); border-radius: 12px;">
-            <p style="color: #3b82f6; font-size: 0.9em; margin: 0;">오늘 방향성</p>
-            <p style="color: {schd_color}; font-size: 1.8em; font-weight: 700; margin: 5px 0;">{schd_analysis['direction']}</p>
-            <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">{schd_analysis['direction_detail']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("**주요 요인**")
-        for factor in schd_analysis['factors']:
-            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;{factor}")
-        
-        if schd_analysis['news']:
-            st.markdown("**관련 뉴스**")
-            for news in schd_analysis['news']:
-                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;[{news['title'][:50]}...]({news['link']})")
-
-# IAU 遺꾩꽍
-iau_color = "#ef4444" if iau_data['change_pct'] >= 0 else "#3b82f6"
-iau_icon = "📈" if iau_data['change_pct'] >= 0 else "📉"
-
-with st.expander(f"🟡 **IAU (금)** - {iau_icon} {iau_data['change_pct']:+.2f}% (${iau_data['price']:.2f})", expanded=True):
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        st.markdown(f"""
-        <div style="text-align: center; padding: 15px; background: rgba(251, 191, 36, 0.1); border-radius: 12px;">
-            <p style="color: #fbbf24; font-size: 0.9em; margin: 0;">오늘 방향성</p>
-            <p style="color: {iau_color}; font-size: 1.8em; font-weight: 700; margin: 5px 0;">{iau_analysis['direction']}</p>
-            <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">{iau_analysis['direction_detail']}</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("**주요 요인**")
-        for factor in iau_analysis['factors']:
-            st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;{factor}")
-        
-        if iau_analysis['news']:
-            st.markdown("**관련 뉴스**")
-            for news in iau_analysis['news']:
-                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;[{news['title'][:50]}...]({news['link']})")
-
-# VIX 遺꾩꽍
-if vix_data:
-    vix_color = "#3b82f6" if vix_data['change_pct'] >= 0 else "#10b981"
-    vix_icon = "상승" if vix_data['change_pct'] >= 0 else "하락"
-    vix_status = "변동성 상승 (주의)" if vix_data['change_pct'] >= 0 else "변동성 하락 (안정화)"
-    
-    with st.expander(f"🔴 **VIX (공포 지수)** - {vix_icon} {vix_data['change_pct']:+.2f}% ({vix_data['price']:.2f})", expanded=False):
-        col1, col2 = st.columns([1, 2])
-        
-        with col1:
-            st.markdown(f"""
-            <div style="text-align: center; padding: 15px; background: rgba(239, 68, 68, 0.1); border-radius: 12px;">
-                <p style="color: #ef4444; font-size: 0.9em; margin: 0;">시장 변동성</p>
-                <p style="color: {vix_color}; font-size: 1.5em; font-weight: 700; margin: 5px 0;">{vix_status.split('(')[0].strip()}</p>
-                <p style="color: #94a3b8; font-size: 0.85em; margin: 0;">VIX {vix_data['price']:.1f}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown("**VIX 해석**")
-            if vix_data['price'] <= 14:
-                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;- 매우 낮음: 과열 구간 (DEFCON 조건)")
-            elif vix_data['price'] <= 20:
-                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;= 정상 범위: 일반적 시장 변동성")
-            elif vix_data['price'] <= 30:
-                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;+ 높은 편: 불안정한 시장 상황")
-            else:
-                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;+ 매우 높음: 극단적 공포 국면")
-            
-            st.markdown("**투자자 시사점**")
-            if vix_data['change_pct'] >= 0:
-                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;⚠️ 변동성 증가 중 - 신중한 접근 권장")
-            else:
-                st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;변동성 하락 중: 시장 안정화 신호 가능성")
-
-st.markdown("---")
-
-# =====================================================================
-# Portfolio history (Google Sheets integration)
-# =====================================================================
-if gs_available and is_personal_mode:
-    with st.expander("📊 포트폴리오 히스토리", expanded=False):
-        history_df, history_error = get_portfolio_history()
-        
-        if history_error:
-            st.info(f"안내: {history_error}")
-        elif history_df is not None and len(history_df) > 0:
-            # Portfolio value trend chart
-            st.subheader("포트폴리오 가치 추이")
-            
-            # Prepare chart dataframe
-            chart_df = history_df[['Date', 'TotalValue']].dropna().copy()
-            chart_df = chart_df.sort_values('Date')
-            
-            if len(chart_df) > 0:
-                # Period selector
-                st.markdown("**기간 선택**")
-                period_options = ["전체", "최근 1주", "최근 1개월", "최근 3개월", "최근 6개월", "최근 1년", "사용자 지정"]
-                selected_period = st.selectbox("조회 기간", period_options, index=0, label_visibility="collapsed")
-                
-                # Apply period filter
-                today = pd.Timestamp.now()
-                if selected_period == "최근 1주":
-                    start_date = today - pd.Timedelta(days=7)
-                    filtered_df = chart_df[chart_df['Date'] >= start_date]
-                elif selected_period == "최근 1개월":
-                    start_date = today - pd.Timedelta(days=30)
-                    filtered_df = chart_df[chart_df['Date'] >= start_date]
-                elif selected_period == "최근 3개월":
-                    start_date = today - pd.Timedelta(days=90)
-                    filtered_df = chart_df[chart_df['Date'] >= start_date]
-                elif selected_period == "최근 6개월":
-                    start_date = today - pd.Timedelta(days=180)
-                    filtered_df = chart_df[chart_df['Date'] >= start_date]
-                elif selected_period == "최근 1년":
-                    start_date = today - pd.Timedelta(days=365)
-                    filtered_df = chart_df[chart_df['Date'] >= start_date]
-                elif selected_period == "사용자 지정":
-                    col_date1, col_date2 = st.columns(2)
-                    with col_date1:
-                        min_date = chart_df['Date'].min().date() if len(chart_df) > 0 else today.date()
-                        start_date = st.date_input("시작일", value=min_date, min_value=min_date)
-                    with col_date2:
-                        max_date = chart_df['Date'].max().date() if len(chart_df) > 0 else today.date()
-                        end_date = st.date_input("End Date", value=max_date, max_value=max_date)
-                    filtered_df = chart_df[(chart_df['Date'].dt.date >= start_date) & (chart_df['Date'].dt.date <= end_date)]
-                else:  # 전체
-                    filtered_df = chart_df
-                
-                if len(filtered_df) > 0:
-                    # Compute y-range dynamically with margin
-                    min_val = filtered_df['TotalValue'].min()
-                    max_val = filtered_df['TotalValue'].max()
-                    value_range = max_val - min_val
-                    
-                    # Add 5% vertical padding
-                    if value_range > 0:
-                        y_min = min_val - (value_range * 0.05)
-                        y_max = max_val + (value_range * 0.05)
-                    else:
-                        # Handle flat series
-                        y_min = min_val * 0.95
-                        y_max = max_val * 1.05
-                    
-                    # Plotly interactive chart
-                    fig = go.Figure()
-                    
-                    # Add line trace
-                    fig.add_trace(go.Scatter(
-                        x=filtered_df['Date'],
-                        y=filtered_df['TotalValue'],
-                        mode='lines+markers',
-                        name='총 자산',
-                        line=dict(color='#10b981', width=2),
-                        marker=dict(size=6, color='#10b981'),
-                        hovertemplate='<b>%{x|%Y-%m-%d %H:%M}</b><br>총 자산: $%{y:,.2f}<extra></extra>'
-                    ))
-                    
-                    # Mark highest/lowest points
-                    max_idx = filtered_df['TotalValue'].idxmax()
-                    min_idx = filtered_df['TotalValue'].idxmin()
-                    
-                    fig.add_trace(go.Scatter(
-                        x=[filtered_df.loc[max_idx, 'Date']],
-                        y=[filtered_df.loc[max_idx, 'TotalValue']],
-                        mode='markers+text',
-                        name='고점',
-                        marker=dict(size=12, color='#ef4444', symbol='triangle-up'),
-                        text=[f"${filtered_df.loc[max_idx, 'TotalValue']:,.2f}"],
-                        textposition='top center',
-                        textfont=dict(color='#ef4444', size=11),
-                        hovertemplate='<b>고점</b><br>%{x|%Y-%m-%d}<br>$%{y:,.2f}<extra></extra>'
-                    ))
-                    
-                    fig.add_trace(go.Scatter(
-                        x=[filtered_df.loc[min_idx, 'Date']],
-                        y=[filtered_df.loc[min_idx, 'TotalValue']],
-                        mode='markers+text',
-                        name='저점',
-                        marker=dict(size=12, color='#3b82f6', symbol='triangle-down'),
-                        text=[f"${filtered_df.loc[min_idx, 'TotalValue']:,.2f}"],
-                        textposition='bottom center',
-                        textfont=dict(color='#3b82f6', size=11),
-                        hovertemplate='<b>저점</b><br>%{x|%Y-%m-%d}<br>$%{y:,.2f}<extra></extra>'
-                    ))
-                    
-                    # Layout settings
-                    fig.update_layout(
-                        title=dict(
-                            text=f"포트폴리오 가치 추이 ({selected_period})",
-                            font=dict(size=16, color='#f1f5f9')
-                        ),
-                        xaxis=dict(
-                            title="날짜",
-                            gridcolor='rgba(148, 163, 184, 0.2)',
-                            tickformat='%m/%d',
-                            rangeslider=dict(visible=True, thickness=0.05),  # Bottom range slider
-                        ),
-                        yaxis=dict(
-                            title="자산 가치 (USD)",
-                            gridcolor='rgba(148, 163, 184, 0.2)',
-                            tickformat='$,.0f',
-                            range=[y_min, y_max],  # Dynamic y-range
-                        ),
-                        plot_bgcolor='rgba(15, 23, 42, 0.8)',
-                        paper_bgcolor='rgba(15, 23, 42, 0)',
-                        font=dict(color='#94a3b8'),
-                        hovermode='x unified',
-                        showlegend=True,
-                        legend=dict(
-                            orientation="h",
-                            yanchor="bottom",
-                            y=1.02,
-                            xanchor="right",
-                            x=1,
-                            font=dict(size=11)
-                        ),
-                        margin=dict(l=10, r=10, t=50, b=10),
-                        height=450
-                    )
-                    
-                    # Mode bar settings
-                    fig.update_layout(
-                        modebar=dict(
-                            bgcolor='rgba(15, 23, 42, 0.8)',
-                            color='#94a3b8',
-                            activecolor='#10b981'
-                        )
-                    )
-                    
-                    st.plotly_chart(fig, width='stretch', config={
-                        'displayModeBar': True,
-                        'modeBarButtonsToAdd': ['drawline', 'eraseshape'],
-                        'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
-                        'displaylogo': False,
-                        'toImageButtonOptions': {
-                            'format': 'png',
-                            'filename': 'fire25_portfolio_history',
-                            'height': 600,
-                            'width': 1200,
-                            'scale': 2
-                        }
-                    })
-                    
-                    # Period statistics
-                    st.markdown("---")
-                    st.markdown("**선택 기간 통계**")
-                    
-                    period_first = filtered_df['TotalValue'].iloc[0]
-                    period_last = filtered_df['TotalValue'].iloc[-1]
-                    period_change = period_last - period_first
-                    period_change_pct = (period_change / period_first) * 100 if period_first > 0 else 0
-                    period_max = filtered_df['TotalValue'].max()
-                    period_min = filtered_df['TotalValue'].min()
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("시작", f"${period_first:,.2f}")
-                    with col2:
-                        st.metric("현재", f"${period_last:,.2f}", f"{period_change_pct:+.2f}%")
-                    with col3:
-                        st.metric("최고", f"${period_max:,.2f}", f"+${period_max - period_first:,.2f}")
-                    with col4:
-                        st.metric("최저", f"${period_min:,.2f}", f"${period_min - period_first:,.2f}")
-                    
-                else:
-                    st.warning("선택한 기간에 데이터가 없습니다.")
-            
-            # Recent records table
-            st.markdown("---")
-            st.subheader("최근 기록")
-            display_df = history_df.tail(10).sort_values('Date', ascending=False).copy()
-            display_df['TotalValue'] = display_df['TotalValue'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "-")
-            display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%Y-%m-%d %H:%M')
-            st.dataframe(display_df, width='stretch', hide_index=True)
-elif is_personal_mode and not gs_available:
-    st.info("🔎 개인 모드 히스토리를 보려면 Google Sheets 연동이 필요합니다.")
-else:
-    st.markdown("### 📊 포트폴리오 히스토리")
-    st.markdown(
-        """
-        <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 10px; padding: 14px;">
-            <p style="margin: 0; color: #e2e8f0; font-weight: 600;">📢 공개 모드 안내</p>
-            <p style="margin: 8px 0 0 0; color: #94a3b8;">
-                공개 모드에서는 개인 포트폴리오 히스토리를 저장/조회하지 않습니다.
-                상세 히스토리 기능은 개인 모드에서만 활성화됩니다.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
 st.markdown("---")
 st.markdown("""
 <p style='text-align: center; color: #94a3b8; font-size: 0.9em;'>
@@ -3182,7 +1900,3 @@ st.markdown("""
     📡 데이터 출처: Yahoo Finance (15-20분 지연)<br>
     ⚠️ 본 대시보드는 투자 참고용이며, 투자 결정은 본인 책임입니다.</p>
 """, unsafe_allow_html=True)
-
-
-
-

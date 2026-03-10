@@ -208,13 +208,33 @@ def generate_ai_analysis(
     except Exception:
         text = ""
 
+    response_id = getattr(response, "id", None)
+    response_model = getattr(response, "model", None)
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", None) if usage is not None else None
+    output_tokens = getattr(usage, "output_tokens", None) if usage is not None else None
+    total_tokens = getattr(usage, "total_tokens", None) if usage is not None else None
+
+    print("AI RESPONSE ID:", response_id)
+    print("AI RESPONSE MODEL:", response_model)
+    print("AI RESPONSE USAGE:", usage)
+    print("AI RESPONSE INPUT TOKENS:", input_tokens)
+    print("AI RESPONSE OUTPUT TOKENS:", output_tokens)
+    print("AI RESPONSE TOTAL TOKENS:", total_tokens)
+
     print("AI RAW RESPONSE:", text)
 
     parsed = parse_ai_output(text)
     if not parsed:
         return None, "parse_error"
+
+    parsed = dict(parsed)
+    if response_id:
+        parsed["_response_id"] = str(response_id)
+    if total_tokens is not None:
+        parsed["_usage_tokens"] = int(total_tokens)
+
     if debug:
-        parsed = dict(parsed)
         parsed["_ai_raw"] = text
     return parsed, None
 
@@ -247,6 +267,10 @@ def get_ai_advice(
             "_ai_source": "openai",
             "_debug_error": None,
         }
+        if parsed.get("_response_id"):
+            out["_response_id"] = parsed.get("_response_id")
+        if parsed.get("_usage_tokens") is not None:
+            out["_usage_tokens"] = parsed.get("_usage_tokens")
         return out
     except Exception:
         # Never let AI layer crash Streamlit dashboard.

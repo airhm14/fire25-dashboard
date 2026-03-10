@@ -1251,6 +1251,15 @@ with tab3:
         if total_tokens is not None:
             st.caption(f"토큰 사용량: input {input_tokens or 0} / output {output_tokens or 0} / total {total_tokens}")
 
+        d1, d2, d3 = st.columns(3)
+        with d1:
+            dp = advice.get("dip_probability", 0)
+            st.metric("Dip Probability", f"{dp}%")
+        with d2:
+            st.metric("Risk Level", advice.get("risk_level", "보통"))
+        with d3:
+            st.metric("AI Confidence", advice.get("confidence", "낮음"))
+
         a1, a2 = st.columns(2)
         with a1:
             st.markdown("**오늘 시장 해석**")

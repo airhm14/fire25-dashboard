@@ -21,8 +21,16 @@ AI_PROMPT_TEMPLATE = """
     "market_view": "",
     "shield_alert": "",
     "dip_signal": "",
-    "action": ""
+    "action": "",
+    "dip_probability": 0,
+    "risk_level": "",
+    "confidence": ""
 }}
+
+추가 규칙:
+- dip_probability: 향후 조정 확률을 0~100 정수로 판단하세요.
+- risk_level: "낮음", "보통", "높음" 중 하나를 선택하세요.
+- confidence: AI 판단 신뢰도를 "낮음", "중간", "높음" 중 하나로 표시하세요.
 
 입력 컨텍스트:
 {context_json}
@@ -34,6 +42,9 @@ PROMPT_ERROR_FALLBACK = {
         "shield_alert": "프롬프트 오류",
         "dip_signal": "확인 필요",
         "action": "설정을 점검하세요.",
+        "dip_probability": 0,
+        "risk_level": "보통",
+        "confidence": "낮음",
 }
 
 
@@ -42,6 +53,9 @@ GENERAL_FALLBACK = {
         "shield_alert": "방어 신호는 중립입니다. 변동성 급등 여부를 점검하세요.",
         "dip_signal": "웅줍 신호는 보조 지표와 함께 확인하세요.",
         "action": "현금 비중과 목표 비중을 유지하며 단계적으로 대응하세요.",
+        "dip_probability": 50,
+        "risk_level": "보통",
+        "confidence": "낮음",
 }
 
 
@@ -150,6 +164,20 @@ def parse_ai_output(text: str) -> dict | None:
     }
     if not any(result.values()):
         return None
+
+    # Extended fields — safe defaults when model omits them
+    try:
+        dp = int(parsed.get("dip_probability", 0))
+        result["dip_probability"] = max(0, min(100, dp))
+    except (TypeError, ValueError):
+        result["dip_probability"] = 0
+
+    rl = str(parsed.get("risk_level", "")).strip()
+    result["risk_level"] = rl if rl in ("낮음", "보통", "높음") else "보통"
+
+    cf = str(parsed.get("confidence", "")).strip()
+    result["confidence"] = cf if cf in ("낮음", "중간", "높음") else "낮음"
+
     return result
 
 def _build_prompt(context: dict) -> str:
@@ -296,6 +324,9 @@ def get_ai_advice(
             "shield_alert": parsed.get("shield_alert") or GENERAL_FALLBACK["shield_alert"],
             "dip_signal": parsed.get("dip_signal") or GENERAL_FALLBACK["dip_signal"],
             "action": parsed.get("action") or GENERAL_FALLBACK["action"],
+            "dip_probability": parsed.get("dip_probability", GENERAL_FALLBACK["dip_probability"]),
+            "risk_level": parsed.get("risk_level") or GENERAL_FALLBACK["risk_level"],
+            "confidence": parsed.get("confidence") or GENERAL_FALLBACK["confidence"],
             "_ai_source": "openai",
             "_debug_error": None,
         }

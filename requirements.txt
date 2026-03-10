@@ -10,4 +10,4 @@ requests
 plotly
 feedparser
 google-generativeai
-openai
+openai>=1.40.0

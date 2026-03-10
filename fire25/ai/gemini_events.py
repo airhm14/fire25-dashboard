@@ -120,7 +120,7 @@ def detect_events(
         )
         text = getattr(response, "text", "") or ""
     except Exception as e:
-        return {**GEMINI_FALLBACK, **meta, "_debug_error": f"api_error:{type(e).__name__}"}
+        return {**GEMINI_FALLBACK, **meta, "_debug_error": f"api_error:{type(e).__name__}:{e}"}
 
     parsed = _parse_gemini_output(text)
     if not parsed:

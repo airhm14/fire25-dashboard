@@ -120,7 +120,7 @@ def interpret_macro(
     try:
         message = client.messages.create(
             model=_model,
-            max_tokens=600,
+            max_tokens=900,
             messages=[{"role": "user", "content": prompt}],
             timeout=timeout,
         )

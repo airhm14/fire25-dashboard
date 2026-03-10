@@ -1808,8 +1808,9 @@ with tab3:
         unsafe_allow_html=True)
 
     if st.button("AI 분석 실행", width='stretch', key="ai_orch"):
-        openai_key = st.secrets.get("OPENAI_API_KEY", "")
+        gemini_key = st.secrets.get("GEMINI_API_KEY", "")
         claude_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+        openai_key = st.secrets.get("OPENAI_API_KEY", "")
 
         from fire25.ai.decision_context_builder import build_decision_context
         from fire25.ai.ai_router import run_all as ai_run_all
@@ -1855,6 +1856,7 @@ with tab3:
                 asset_focus="growth",
                 openai_api_key=openai_key,
                 claude_api_key=claude_key,
+                gemini_api_key=gemini_key,
             )
 
         # ── 4. Gemini 이벤트 브리프 ──

@@ -27,12 +27,13 @@ def _cached_gemini(
     signals_json: str,
     themes_json: str,
     asset_focus: str,
+    gemini_api_key: str,
 ) -> dict:
     import json
     articles = json.loads(articles_json)
     signals = json.loads(signals_json)
     themes = json.loads(themes_json)
-    return detect_events(articles, signals, themes, asset_focus)
+    return detect_events(articles, signals, themes, asset_focus, api_key=gemini_api_key)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -63,7 +64,8 @@ def run_all(
     openai_api_key: str = "",
     openai_model: str = "gpt-4o-mini",
     claude_api_key: str = "",
-    claude_model: str = "claude-sonnet-4-20250514",
+    claude_model: str = "claude-3-5-sonnet-latest",
+    gemini_api_key: str = "",
 ) -> dict[str, dict]:
     """Orchestrate all three AI providers and return their results.
 
@@ -79,6 +81,7 @@ def run_all(
             signals_json=json.dumps(aggregated_signals or {}, ensure_ascii=False),
             themes_json=json.dumps(theme_info or {}, ensure_ascii=False),
             asset_focus=asset_focus,
+            gemini_api_key=gemini_api_key,
         )
     except Exception:
         gemini_result = dict(GEMINI_FALLBACK)

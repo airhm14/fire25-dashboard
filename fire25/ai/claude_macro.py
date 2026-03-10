@@ -85,7 +85,7 @@ def _parse_claude_output(text: str) -> dict | None:
 def interpret_macro(
     context: dict,
     api_key: str = "",
-    model: str = "claude-sonnet-4-20250514",
+    model: str = "claude-3-5-sonnet-latest",
     timeout: float = 20.0,
 ) -> dict:
     """Call Claude to interpret macro conditions.

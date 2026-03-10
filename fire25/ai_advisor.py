@@ -168,14 +168,7 @@ def generate_ai_analysis(
     try:
         response = client.responses.create(
             model=model,
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt}
-                    ],
-                }
-            ],
+            input=prompt,
             timeout=timeout,
         )
     except Exception as e:

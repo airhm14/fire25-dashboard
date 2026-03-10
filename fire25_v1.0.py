@@ -1234,6 +1234,10 @@ with tab3:
         advice = get_ai_advice(context=context, api_key=api_key)
         ai_source = str(advice.get("_ai_source", "fallback"))
         debug_error = advice.get("_debug_error", None)
+        response_id = advice.get("_response_id")
+        input_tokens = advice.get("_input_tokens")
+        output_tokens = advice.get("_output_tokens")
+        total_tokens = advice.get("_total_tokens")
 
         if ai_source == "openai":
             st.caption("AI 상태: OpenAI 응답")
@@ -1241,6 +1245,11 @@ with tab3:
             st.caption("AI 상태: fallback 응답")
             if debug_error:
                 st.caption(f"디버그: {debug_error}")
+
+        if response_id:
+            st.caption(f"response_id: {response_id}")
+        if total_tokens is not None:
+            st.caption(f"토큰 사용량: input {input_tokens or 0} / output {output_tokens or 0} / total {total_tokens}")
 
         a1, a2 = st.columns(2)
         with a1:

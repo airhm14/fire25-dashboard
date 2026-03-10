@@ -167,24 +167,24 @@ def generate_ai_analysis(
     model: str = "gpt-4o-mini",
     timeout: float = 20.0,
     debug: bool = False,
-) -> tuple[dict | None, str | None]:
+) -> tuple[dict | None, str | None, dict | None]:
     """Call OpenAI and return parsed structured analysis."""
     if not str(api_key or "").strip():
-        return None, "missing_api_key"
+        return None, "missing_api_key", None
 
     try:
         from openai import OpenAI
     except Exception:
-        return None, "missing_openai_sdk"
+        return None, "missing_openai_sdk", None
 
     try:
         client = OpenAI(api_key=api_key)
     except Exception as e:
-        return None, f"api_error:{type(e).__name__}:{str(e)}"
+        return None, f"api_error:{type(e).__name__}:{str(e)}", None
     try:
         prompt = _build_prompt(context)
     except Exception:
-        return None, "prompt_generation_error"
+        return None, "prompt_generation_error", None
 
     try:
         response = client.responses.create(
@@ -198,7 +198,7 @@ def generate_ai_analysis(
             timeout=timeout,
         )
     except Exception as e:
-        return None, f"api_error:{type(e).__name__}:{str(e)}"
+        return None, f"api_error:{type(e).__name__}:{str(e)}", None
 
     text = ""
     try:
@@ -208,6 +208,8 @@ def generate_ai_analysis(
 
     response_id = getattr(response, "id", None)
     usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", None) if usage is not None else None
+    output_tokens = getattr(usage, "output_tokens", None) if usage is not None else None
     total_tokens = getattr(usage, "total_tokens", None) if usage is not None else None
 
     print("OPENAI RESPONSE ID:", response_id)
@@ -220,17 +222,33 @@ def generate_ai_analysis(
 
     parsed = parse_ai_output(text)
     if not parsed:
-        return None, "parse_error"
+        return None, "parse_error", {
+            "response_id": response_id,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+        }
 
     parsed = dict(parsed)
     if response_id:
         parsed["_response_id"] = str(response_id)
+    if input_tokens is not None:
+        parsed["_input_tokens"] = int(input_tokens)
+    if output_tokens is not None:
+        parsed["_output_tokens"] = int(output_tokens)
     if total_tokens is not None:
+        parsed["_total_tokens"] = int(total_tokens)
         parsed["_usage_tokens"] = int(total_tokens)
 
     if debug:
         parsed["_ai_raw"] = text
-    return parsed, None
+    debug_meta = {
+        "response_id": response_id,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+    return parsed, None, debug_meta
 
 
 def get_ai_advice(
@@ -240,17 +258,37 @@ def get_ai_advice(
 ) -> dict:
     """Main entry: returns robust, always-usable advice payload."""
     try:
-        parsed, error_code = generate_ai_analysis(context=context, api_key=api_key, model=model)
+        parsed, error_code, debug_meta = generate_ai_analysis(context=context, api_key=api_key, model=model)
         if error_code == "prompt_generation_error":
             out = dict(PROMPT_ERROR_FALLBACK)
             out["_ai_source"] = "fallback"
             out["_debug_error"] = "prompt_generation_error"
+            if isinstance(debug_meta, dict):
+                if debug_meta.get("response_id"):
+                    out["_response_id"] = str(debug_meta.get("response_id"))
+                if debug_meta.get("input_tokens") is not None:
+                    out["_input_tokens"] = int(debug_meta.get("input_tokens"))
+                if debug_meta.get("output_tokens") is not None:
+                    out["_output_tokens"] = int(debug_meta.get("output_tokens"))
+                if debug_meta.get("total_tokens") is not None:
+                    out["_total_tokens"] = int(debug_meta.get("total_tokens"))
+                    out["_usage_tokens"] = int(debug_meta.get("total_tokens"))
             return out
 
         if not parsed:
             out = dict(GENERAL_FALLBACK)
             out["_ai_source"] = "fallback"
             out["_debug_error"] = error_code
+            if isinstance(debug_meta, dict):
+                if debug_meta.get("response_id"):
+                    out["_response_id"] = str(debug_meta.get("response_id"))
+                if debug_meta.get("input_tokens") is not None:
+                    out["_input_tokens"] = int(debug_meta.get("input_tokens"))
+                if debug_meta.get("output_tokens") is not None:
+                    out["_output_tokens"] = int(debug_meta.get("output_tokens"))
+                if debug_meta.get("total_tokens") is not None:
+                    out["_total_tokens"] = int(debug_meta.get("total_tokens"))
+                    out["_usage_tokens"] = int(debug_meta.get("total_tokens"))
             return out
 
         out = {
@@ -263,8 +301,13 @@ def get_ai_advice(
         }
         if parsed.get("_response_id"):
             out["_response_id"] = parsed.get("_response_id")
-        if parsed.get("_usage_tokens") is not None:
-            out["_usage_tokens"] = parsed.get("_usage_tokens")
+        if parsed.get("_input_tokens") is not None:
+            out["_input_tokens"] = parsed.get("_input_tokens")
+        if parsed.get("_output_tokens") is not None:
+            out["_output_tokens"] = parsed.get("_output_tokens")
+        if parsed.get("_total_tokens") is not None:
+            out["_total_tokens"] = parsed.get("_total_tokens")
+            out["_usage_tokens"] = parsed.get("_total_tokens")
         return out
     except Exception:
         # Never let AI layer crash Streamlit dashboard.

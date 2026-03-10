@@ -22,10 +22,13 @@ def format_gemini_section(gemini: dict) -> dict:
 
     Gemini 역할: 이벤트 요약만 (해석은 Claude 영역).
     """
+    _src = gemini.get("_source", gemini.get("brief_source", "fallback"))
     return {
         "headline": short_korean(gemini.get("headline_summary", ""), 2),
         "drivers": gemini.get("macro_drivers", []),
-        "source": "Gemini" if gemini.get("brief_source") == "gemini" else "규칙 기반",
+        "source": "Gemini" if _src == "gemini" else "규칙 기반",
+        "_source": _src,
+        "_debug_error": gemini.get("_debug_error"),
     }
 
 
@@ -37,6 +40,8 @@ def format_claude_section(claude: dict) -> dict:
         "opportunity": short_korean(claude.get("opportunity", ""), 1),
         "watch_point": short_korean(claude.get("watch_point", ""), 1),
         "source": claude.get("_source", "fallback"),
+        "_source": claude.get("_source", "fallback"),
+        "_debug_error": claude.get("_debug_error"),
     }
 
 
@@ -51,4 +56,6 @@ def format_openai_section(openai_advice: dict) -> dict:
         "risk_level": openai_advice.get("risk_level", "보통"),
         "confidence": openai_advice.get("confidence", "낮음"),
         "source": openai_advice.get("_ai_source", "fallback"),
+        "_source": openai_advice.get("_ai_source", "fallback"),
+        "_debug_error": openai_advice.get("_debug_error"),
     }

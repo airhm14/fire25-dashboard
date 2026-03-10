@@ -1929,6 +1929,23 @@ with tab3:
                 <p style="color:#e2e8f0;margin:0;">{of.get('action','데이터 부족')}</p>
             </div>""", unsafe_allow_html=True)
 
+        # ── AI 상태 진단 ──
+        def _status_dot(src, err):
+            if src and src != "fallback":
+                return "🟢", "정상"
+            if err:
+                return "🔴", str(err)
+            return "🟡", "fallback"
+
+        _g_dot, _g_msg = _status_dot(gf.get("_source"), gf.get("_debug_error"))
+        _c_dot, _c_msg = _status_dot(cf.get("_source"), cf.get("_debug_error"))
+        _o_dot, _o_msg = _status_dot(of.get("_source"), of.get("_debug_error"))
+        with st.expander("AI 상태 진단", expanded=False):
+            st.markdown(f"{_g_dot} **Gemini** — {_g_msg}")
+            st.markdown(f"{_c_dot} **Claude** — {_c_msg}")
+            st.markdown(f"{_o_dot} **OpenAI** — {_o_msg}")
+            st.caption("🟢 정상 | 🟡 fallback (키 없음/SDK 없음) | 🔴 오류")
+
     st.markdown("---")
 
     # ── 7. 포트폴리오 관점 (엔진 원자료) ──

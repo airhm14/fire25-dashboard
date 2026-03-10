@@ -144,7 +144,7 @@ def _build_prompt(context: dict) -> str:
 def generate_ai_analysis(
     context: dict,
     api_key: str,
-    model: str = "gpt-4.1-mini",
+    model: str = "gpt-4o-mini",
     timeout: float = 20.0,
 ) -> tuple[dict | None, str | None]:
     """Call OpenAI and return parsed structured analysis."""
@@ -158,8 +158,8 @@ def generate_ai_analysis(
 
     try:
         client = OpenAI(api_key=api_key)
-    except Exception:
-        return None, "api_error"
+    except Exception as e:
+        return None, f"api_error:{type(e).__name__}:{str(e)}"
     try:
         prompt = _build_prompt(context)
     except Exception:
@@ -178,8 +178,8 @@ def generate_ai_analysis(
             ],
             timeout=timeout,
         )
-    except Exception:
-        return None, "api_error"
+    except Exception as e:
+        return None, f"api_error:{type(e).__name__}:{str(e)}"
 
     text = ""
     try:
@@ -196,7 +196,7 @@ def generate_ai_analysis(
 def get_ai_advice(
     context: dict,
     api_key: str,
-    model: str = "gpt-4.1-mini",
+    model: str = "gpt-4o-mini",
 ) -> dict:
     """Main entry: returns robust, always-usable advice payload."""
     try:

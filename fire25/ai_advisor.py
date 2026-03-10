@@ -101,21 +101,43 @@ def parse_ai_output(text: str) -> dict | None:
     if not raw:
         return None
 
-    if raw.startswith("```"):
-        raw = re.sub(r"^```[a-zA-Z0-9_-]*", "", raw).strip()
-        if raw.endswith("```"):
-            raw = raw[:-3].strip()
+    # Try raw text first, then fenced code blocks, and extract the first valid JSON object.
+    candidates: list[str] = [raw]
+    for m in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", raw, flags=re.IGNORECASE):
+        block = (m.group(1) or "").strip()
+        if block:
+            candidates.append(block)
 
-    try:
-        parsed = json.loads(raw)
-    except Exception:
-        m = re.search(r"\{[\s\S]*\}", raw)
-        if not m:
-            return None
+    decoder = json.JSONDecoder()
+    parsed: dict | None = None
+    for candidate in candidates:
+        cleaned = candidate.strip()
+        if not cleaned:
+            continue
+
         try:
-            parsed = json.loads(m.group(0))
+            obj = json.loads(cleaned)
+            if isinstance(obj, dict):
+                parsed = obj
+                break
         except Exception:
-            return None
+            pass
+
+        for i, ch in enumerate(cleaned):
+            if ch != "{":
+                continue
+            try:
+                obj, _ = decoder.raw_decode(cleaned[i:])
+                if isinstance(obj, dict):
+                    parsed = obj
+                    break
+            except Exception:
+                continue
+        if parsed is not None:
+            break
+
+    if parsed is None:
+        return None
 
     if not isinstance(parsed, dict):
         return None
@@ -146,6 +168,7 @@ def generate_ai_analysis(
     api_key: str,
     model: str = "gpt-4o-mini",
     timeout: float = 20.0,
+    debug: bool = False,
 ) -> tuple[dict | None, str | None]:
     """Call OpenAI and return parsed structured analysis."""
     if not str(api_key or "").strip():
@@ -168,7 +191,12 @@ def generate_ai_analysis(
     try:
         response = client.responses.create(
             model=model,
-            input=prompt,
+            input=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
             timeout=timeout,
         )
     except Exception as e:
@@ -180,9 +208,14 @@ def generate_ai_analysis(
     except Exception:
         text = ""
 
+    print("AI RAW RESPONSE:", text)
+
     parsed = parse_ai_output(text)
     if not parsed:
         return None, "parse_error"
+    if debug:
+        parsed = dict(parsed)
+        parsed["_ai_raw"] = text
     return parsed, None
 
 

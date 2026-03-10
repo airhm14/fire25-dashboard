@@ -25,6 +25,7 @@ from fire25.strategy import (
 )
 from fire25.macro_summary import summarize_macro_today
 from fire25.news_engine import get_news_brief
+from fire25.ai_advisor import build_context, get_ai_advice
 from fire25.data_provider import detect_asset_type, get_market_data
 from fire25.fx_provider import get_fx_rate
 from fire25.indicator_engine import compute_indicators
@@ -1199,6 +1200,50 @@ with tab3:
     st.subheader("9 NEWS SIGNAL")
     st.markdown(short_korean(nb.get("headline_summary", "뉴스 요약 데이터가 부족합니다."), max_sentences=2))
     st.caption(f"요약 엔진: {'Gemini' if nb.get('brief_source') == 'gemini' else '규칙 기반'}")
+
+    st.markdown("---")
+    st.subheader("AI 전략 어드바이저")
+    if st.button("AI 전략 분석 실행", width='stretch'):
+        api_key = st.secrets.get("OPENAI_API_KEY", "")
+        qqqm_sma200 = _safe_float(qqqm_data.get("sma_200"), 0.0)
+        qqqm_price = _safe_float(qqqm_data.get("price"), 0.0)
+        sma200_gap = ((qqqm_price - qqqm_sma200) / qqqm_sma200 * 100.0) if qqqm_sma200 > 0 else 0.0
+        cash_level = "높음" if cash_pct >= 15 else ("중간" if cash_pct >= 8 else "낮음")
+
+        context = build_context(
+            portfolio_weight={
+                "QQQM": round(qqqm_pct, 2),
+                "SCHD": round(schd_pct, 2),
+                "IAU": round(iau_pct, 2),
+                "SGOV+현금": round(cash_pct, 2),
+            },
+            target_weight={"QQQM": 72.0, "SCHD": 16.0, "IAU": 2.0, "SGOV+현금": 10.0},
+            recent_buys=[],
+            cash_level=cash_level,
+            vix=_safe_float((vix_data or {}).get("price"), 20.0),
+            fear_greed=_safe_float((fng_data or {}).get("value"), 50.0),
+            qqqm_rsi=_safe_float(qqqm_data.get("rsi"), 50.0),
+            qqqm_sma200_gap=round(sma200_gap, 2),
+            treasury_10y=_safe_float((tnx_data or {}).get("price"), 0.0),
+            oil_price=_safe_float((oil_data or {}).get("price"), 0.0),
+            macro_summary=short_korean(str(macro_summary.get("implication", "")), 2),
+            top_news_summary=short_korean(str(nb.get("headline_summary", "")), 2),
+            market_regime=str(regime_raw),
+        )
+
+        advice = get_ai_advice(context=context, api_key=api_key)
+
+        a1, a2 = st.columns(2)
+        with a1:
+            st.markdown("**Market View**")
+            st.info(advice.get("market_view", "데이터가 부족합니다."))
+            st.markdown("**Shield Alert**")
+            st.warning(advice.get("shield_alert", "데이터가 부족합니다."))
+        with a2:
+            st.markdown("**Dip Signal**")
+            st.info(advice.get("dip_signal", "데이터가 부족합니다."))
+            st.markdown("**Suggested Action**")
+            st.success(advice.get("action", "데이터가 부족합니다."))
 
     if not market_news:
         st.warning("데이터를 불러오는 중입니다.")

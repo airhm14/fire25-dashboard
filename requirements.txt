@@ -10,3 +10,4 @@ requests
 plotly
 feedparser
 google-generativeai
+openai

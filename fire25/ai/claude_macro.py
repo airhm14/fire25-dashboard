@@ -12,6 +12,8 @@ import json
 import re
 from typing import Any
 
+from fire25.ai.model_registry import get_model_name
+
 CLAUDE_PROMPT_TEMPLATE = """
 당신은 TEAM FIRE 25 Dashboard의 거시경제 해석 전문 AI입니다.
 
@@ -85,7 +87,7 @@ def _parse_claude_output(text: str) -> dict | None:
 def interpret_macro(
     context: dict,
     api_key: str = "",
-    model: str = "claude-3-5-sonnet-latest",
+    model: str = "",
     timeout: float = 20.0,
 ) -> dict:
     """Call Claude to interpret macro conditions.
@@ -108,6 +110,8 @@ def interpret_macro(
     except Exception as e:
         return {**CLAUDE_FALLBACK, **out_meta, "_debug_error": f"client_error:{type(e).__name__}"}
 
+    _model = model or get_model_name("claude")
+
     try:
         prompt = _build_prompt(context)
     except Exception:
@@ -115,7 +119,7 @@ def interpret_macro(
 
     try:
         message = client.messages.create(
-            model=model,
+            model=_model,
             max_tokens=600,
             messages=[{"role": "user", "content": prompt}],
             timeout=timeout,

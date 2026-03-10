@@ -11,12 +11,13 @@ from __future__ import annotations
 from typing import Any
 
 from fire25.ai_advisor import build_context, get_ai_advice, GENERAL_FALLBACK
+from fire25.ai.model_registry import get_model_name
 
 
 def get_strategy_advice(
     context: dict,
     api_key: str = "",
-    model: str = "gpt-4o-mini",
+    model: str = "",
 ) -> dict:
     """Run OpenAI strategy analysis using the existing ai_advisor pipeline.
 
@@ -36,6 +37,8 @@ def get_strategy_advice(
         except Exception:
             return d
 
+    _model = model or get_model_name("openai")
+
     advisor_ctx = build_context(
         portfolio_weight=context.get("portfolio_weight"),
         target_weight=context.get("target_weight"),
@@ -52,4 +55,4 @@ def get_strategy_advice(
         market_regime=str(context.get("regime", "")),
     )
 
-    return get_ai_advice(context=advisor_ctx, api_key=api_key, model=model)
+    return get_ai_advice(context=advisor_ctx, api_key=api_key, model=_model)

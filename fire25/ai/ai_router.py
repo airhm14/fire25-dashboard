@@ -14,6 +14,7 @@ import streamlit as st
 from .gemini_events import detect_events, GEMINI_FALLBACK
 from .claude_macro import interpret_macro, CLAUDE_FALLBACK
 from .openai_strategy import get_strategy_advice
+from .model_registry import get_model_name
 from fire25.ai_advisor import GENERAL_FALLBACK
 
 
@@ -28,12 +29,13 @@ def _cached_gemini(
     themes_json: str,
     asset_focus: str,
     gemini_api_key: str,
+    gemini_model: str = "",
 ) -> dict:
     import json
     articles = json.loads(articles_json)
     signals = json.loads(signals_json)
     themes = json.loads(themes_json)
-    return detect_events(articles, signals, themes, asset_focus, api_key=gemini_api_key)
+    return detect_events(articles, signals, themes, asset_focus, api_key=gemini_api_key, model=gemini_model)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -62,10 +64,9 @@ def run_all(
     theme_info: dict | None = None,
     asset_focus: str = "growth",
     openai_api_key: str = "",
-    openai_model: str = "gpt-4o-mini",
     claude_api_key: str = "",
-    claude_model: str = "claude-3-5-sonnet-latest",
     gemini_api_key: str = "",
+    models_config: dict | None = None,
 ) -> dict[str, dict]:
     """Orchestrate all three AI providers and return their results.
 
@@ -73,6 +74,10 @@ def run_all(
     Each value is guaranteed to be a non-None dict with fallback content.
     """
     import json
+
+    _gemini_model = get_model_name("gemini", models_config)
+    _claude_model = get_model_name("claude", models_config)
+    _openai_model = get_model_name("openai", models_config)
 
     # --- Gemini ---
     try:
@@ -82,6 +87,7 @@ def run_all(
             themes_json=json.dumps(theme_info or {}, ensure_ascii=False),
             asset_focus=asset_focus,
             gemini_api_key=gemini_api_key,
+            gemini_model=_gemini_model,
         )
     except Exception:
         gemini_result = dict(GEMINI_FALLBACK)
@@ -91,7 +97,7 @@ def run_all(
         claude_result = _cached_claude(
             context_json=json.dumps(decision_context, ensure_ascii=False),
             api_key=claude_api_key,
-            model=claude_model,
+            model=_claude_model,
         )
     except Exception:
         claude_result = dict(CLAUDE_FALLBACK)
@@ -101,7 +107,7 @@ def run_all(
         openai_result = _cached_openai(
             context_json=json.dumps(decision_context, ensure_ascii=False),
             api_key=openai_api_key,
-            model=openai_model,
+            model=_openai_model,
         )
     except Exception:
         openai_result = dict(GENERAL_FALLBACK)

@@ -1811,6 +1811,7 @@ with tab3:
         gemini_key = st.secrets.get("GEMINI_API_KEY", "")
         claude_key = st.secrets.get("ANTHROPIC_API_KEY", "")
         openai_key = st.secrets.get("OPENAI_API_KEY", "")
+        models_config = dict(st.secrets.get("models", {}))
 
         from fire25.ai.decision_context_builder import build_decision_context
         from fire25.ai.ai_router import run_all as ai_run_all
@@ -1857,6 +1858,7 @@ with tab3:
                 openai_api_key=openai_key,
                 claude_api_key=claude_key,
                 gemini_api_key=gemini_key,
+                models_config=models_config,
             )
 
         # ── 4. Gemini 이벤트 브리프 ──

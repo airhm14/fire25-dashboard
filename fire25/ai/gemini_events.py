@@ -19,8 +19,7 @@ except ImportError:
     def build_gemini_payload(*_a: Any, **_kw: Any) -> dict:  # type: ignore[misc]
         return {}
 
-
-GEMINI_MODEL = "gemini-1.5-flash"
+from fire25.ai.model_registry import get_model_name
 
 GEMINI_FALLBACK: dict[str, Any] = {
     "headline_summary": "Gemini 이벤트 탐지를 실행하지 못했습니다.",
@@ -85,6 +84,7 @@ def detect_events(
     theme_info: dict,
     asset_focus: str = "growth",
     api_key: str = "",
+    model: str = "",
 ) -> dict:
     """Run Gemini event detection and return structured result.
 
@@ -110,9 +110,10 @@ def detect_events(
         payload = {"articles": articles[:10]}
 
     try:
+        _model_name = model or get_model_name("gemini")
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(GEMINI_MODEL)
-        response = model.generate_content(
+        gmodel = genai.GenerativeModel(_model_name)
+        response = gmodel.generate_content(
             _build_prompt(payload),
             generation_config={"temperature": 0.2, "max_output_tokens": 800},
             request_options={"timeout": 15},

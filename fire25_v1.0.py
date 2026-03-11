@@ -881,8 +881,8 @@ def fetch_news_brief(lookback_days=2, max_articles=20, region="US", asset_focus=
 @st.cache_data(ttl=900)
 def fetch_macro_market_metrics():
     """Fetch 10Y treasury and oil as macro dashboard inputs."""
-    tnx = get_market_data("^TNX", period="1mo")
-    oil = get_market_data("CL=F", period="1mo")
+    tnx = get_stock_data("^TNX", period="1mo")
+    oil = get_stock_data("CL=F", period="1mo")
     return tnx, oil
 
 

@@ -178,46 +178,25 @@ def detect_events(
         _model_name = model or get_model_name("gemini")
         client = genai.Client(api_key=api_key)
 
-        # First attempt: with response_mime_type (may not work on thinking models)
-        text = ""
-        _diag = ""
-        for _attempt, _mime in enumerate(["application/json", None]):
-            try:
-                cfg_kwargs: dict[str, Any] = {
-                    "temperature": 0.2,
-                    "max_output_tokens": 800,
-                }
-                if _mime:
-                    cfg_kwargs["response_mime_type"] = _mime
-                resp = client.models.generate_content(
-                    model=_model_name,
-                    contents=_build_prompt(payload),
-                    config=types.GenerateContentConfig(**cfg_kwargs),
-                )
-                # Diagnose response structure
-                _cands = resp.candidates or []
-                _parts_info = ""
-                if _cands and _cands[0].content and _cands[0].content.parts:
-                    _ps = _cands[0].content.parts
-                    _parts_info = f"parts={len(_ps)}"
-                    for _pi, _pp in enumerate(_ps):
-                        _pt = getattr(_pp, "text", None) or ""
-                        _th = getattr(_pp, "thought", None)
-                        _parts_info += f",p{_pi}:thought={_th}/len={len(_pt)}"
-                else:
-                    _parts_info = f"cands={len(_cands)}"
-                _diag = f"attempt={_attempt},mime={_mime},{_parts_info}"
-
-                text = _extract_gemini_text(resp)
-                if text and text.strip():
-                    break  # got usable text
-            except Exception as inner_e:
-                _diag = f"attempt={_attempt},mime={_mime},err={type(inner_e).__name__}:{inner_e}"
-                continue
+        cfg = types.GenerateContentConfig(
+            temperature=0.2,
+            max_output_tokens=800,
+            response_mime_type="application/json",
+        )
+        resp = client.models.generate_content(
+            model=_model_name,
+            contents=_build_prompt(payload),
+            config=cfg,
+        )
+        text = _extract_gemini_text(resp)
 
         if not text or not text.strip():
+            _cands = resp.candidates or []
+            _parts_info = f"cands={len(_cands)}"
+            if _cands and _cands[0].content and _cands[0].content.parts:
+                _parts_info = f"parts={len(_cands[0].content.parts)}"
             return {**GEMINI_FALLBACK, **meta,
-                    "_debug_error": f"empty_response|{_diag}"}
+                    "_debug_error": f"empty_response|{_parts_info}"}
     except Exception as e:
         return {**GEMINI_FALLBACK, **meta, "_debug_error": f"api_error:{type(e).__name__}:{e}"}
 

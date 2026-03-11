@@ -74,6 +74,7 @@ Buy Fear · Rebalance Strength · Protect Core Asset · Compound Long Term
   "regime": "{regime}",
   "market_view": "현재 시장에 대한 해석 1~2문장",
   "strategy_reason": "이 전략을 선택한 이유 1~2문장",
+  "risk_level": "LOW|MODERATE|HIGH",
   "recommended_actions": [
     {{"ticker": "QQQM", "action": "BUY|HOLD|REDUCE", "amount": 정수_또는_0}},
     {{"ticker": "SCHD", "action": "BUY|HOLD|REDUCE", "amount": 정수_또는_0}},
@@ -81,7 +82,8 @@ Buy Fear · Rebalance Strength · Protect Core Asset · Compound Long Term
     {{"ticker": "SGOV", "action": "BUY|HOLD|REDUCE", "amount": 정수_또는_0}}
   ],
   "cash_action": "KEEP|DEPLOY|INCREASE",
-  "confidence_score": 0~100_정수
+  "confidence_score": 0~100_정수,
+  "reason_codes": ["코드1", "코드2"]
 }}
 """.strip()
 
@@ -90,6 +92,7 @@ FALLBACK: dict[str, Any] = {
     "regime": "NORMAL",
     "market_view": "전략 생성에 실패했습니다.",
     "strategy_reason": "",
+    "risk_level": "MODERATE",
     "recommended_actions": [
         {"ticker": "QQQM", "action": "HOLD", "amount": 0},
         {"ticker": "SCHD", "action": "HOLD", "amount": 0},
@@ -98,6 +101,7 @@ FALLBACK: dict[str, Any] = {
     ],
     "cash_action": "KEEP",
     "confidence_score": 0,
+    "reason_codes": ["FALLBACK"],
     "_source": "fallback",
     "_debug_error": None,
 }
@@ -163,7 +167,8 @@ def run(
             model=_model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1200,
-            temperature=0.3,
+            temperature=0,
+            seed=42,
             timeout=timeout,
         )
         text = response.choices[0].message.content or ""
@@ -181,5 +186,8 @@ def run(
     parsed.setdefault("regime", regime)
     parsed.setdefault("confidence_score", 50)
     parsed.setdefault("cash_action", "KEEP")
+    parsed.setdefault("risk_level", "MODERATE")
+    parsed.setdefault("reason_codes", [])
+    parsed.setdefault("recommended_actions", FALLBACK["recommended_actions"])
     parsed.setdefault("recommended_actions", FALLBACK["recommended_actions"])
     return parsed

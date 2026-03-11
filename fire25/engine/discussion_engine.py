@@ -145,6 +145,7 @@ def run_discussion(
         msg = client.messages.create(
             model=_claude_model,
             max_tokens=1000,
+            temperature=0,
             messages=[{"role": "user", "content": prompt}],
             timeout=30.0,
         )
@@ -169,7 +170,8 @@ def run_discussion(
             model=_gpt_model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1000,
-            temperature=0.3,
+            temperature=0,
+            seed=42,
             timeout=30.0,
         )
         final = _parse_json(resp.choices[0].message.content or "")

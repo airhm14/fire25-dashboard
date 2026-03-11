@@ -1799,8 +1799,21 @@ with tab3:
         _rc = _regime_colors.get(_regime_name, "#94a3b8")
         _persist_tag = " ⏳ 확인 대기중" if _rg.get("persistence_pending") else ""
         _consistency_tag = ""
-        if orch_result.get("strategy_consistency") == "regime_unchanged":
-            _consistency_tag = " · 📌 이전 전략 유지 (Regime 미변경)"
+        _cache_hit = orch_result.get("cache_hit", False)
+        _reused = orch_result.get("reused_strategy", False)
+        _regime_changed = orch_result.get("regime_changed", True)
+        _strat_hash = orch_result.get("strategy_hash", "")[:12]
+        _lock_exc = orch_result.get("regime_lock_exception")
+
+        if _cache_hit:
+            _consistency_tag = " · 🔄 기존 전략 재사용 (캐시 히트)"
+        elif orch_result.get("strategy_consistency") == "regime_lock":
+            _consistency_tag = " · 📌 이전 전략 유지 (Regime Lock)"
+        elif _reused:
+            _consistency_tag = " · 📌 이전 전략 유지"
+        if _lock_exc:
+            _consistency_tag += f" · ⚡ 예외: {_lock_exc}"
+
         st.markdown(f"""
         <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
                     border:2px solid {_rc};border-radius:12px;padding:16px;margin-bottom:16px;">
@@ -1814,6 +1827,20 @@ with tab3:
             <p style="color:#cbd5e1;margin:8px 0 0;font-size:0.85em;">
                 {' / '.join(_rg.get('reasons', []))}
             </p>
+        </div>""", unsafe_allow_html=True)
+
+        # ── 전략 일관성 메타데이터 ──
+        _hash_display = _strat_hash or "—"
+        _cache_label = "🟢 HIT" if _cache_hit else "🔴 MISS"
+        _regime_chg_label = "⚡ 변경됨" if _regime_changed else "✅ 유지"
+        _reuse_label = "✅ 재사용" if _reused else "🆕 신규 생성"
+        st.markdown(f"""
+        <div style="background:#1e293b;border-radius:8px;padding:10px 14px;margin-bottom:12px;
+                    display:flex;gap:16px;flex-wrap:wrap;font-size:0.82em;color:#94a3b8;">
+            <span>🔑 Hash: <code style="color:#60a5fa;">{_hash_display}</code></span>
+            <span>💾 Cache: {_cache_label}</span>
+            <span>📊 Regime: {_regime_chg_label}</span>
+            <span>♻️ 전략: {_reuse_label}</span>
         </div>""", unsafe_allow_html=True)
 
         # ── Gemini 이벤트 브리프 ──
@@ -1960,6 +1987,18 @@ with tab3:
             st.markdown(f"{_c_dot} **Claude** (`{_cr.get('_agent','')}`) — {_c_msg}")
             st.markdown(f"{_g_dot} **GPT** (`{_gr.get('_agent','')}`) — {_g_msg}")
             st.caption("🟢 정상 | 🟡 fallback (키 없음/SDK 없음) | 🔴 오류")
+            st.markdown("---")
+            st.markdown("**📋 일관성 메타데이터**")
+            st.markdown(f"- **strategy_hash**: `{orch_result.get('strategy_hash', '—')}`")
+            st.markdown(f"- **cache_hit**: {orch_result.get('cache_hit', False)}")
+            st.markdown(f"- **regime_changed**: {orch_result.get('regime_changed', True)}")
+            st.markdown(f"- **reused_strategy**: {orch_result.get('reused_strategy', False)}")
+            if orch_result.get("regime_lock_exception"):
+                st.markdown(f"- **regime_lock_exception**: {orch_result['regime_lock_exception']}")
+            _dctx = orch_result.get("decision_context")
+            if _dctx:
+                with st.expander("📸 Decision Context Snapshot", expanded=False):
+                    st.json(_dctx)
             st.json(orch_result)
 
     st.markdown("---")

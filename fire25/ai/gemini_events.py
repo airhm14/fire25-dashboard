@@ -217,7 +217,8 @@ def detect_events(
         client = genai.Client(api_key=api_key)
 
         cfg = types.GenerateContentConfig(
-            temperature=0.2,
+            temperature=0,
+            top_p=1,
             max_output_tokens=8192,
             thinking_config=types.ThinkingConfig(thinking_budget=0),
         )

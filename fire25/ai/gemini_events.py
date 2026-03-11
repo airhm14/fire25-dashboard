@@ -34,47 +34,78 @@ GEMINI_FALLBACK: dict[str, Any] = {
 
 
 def _build_prompt(payload: dict) -> str:
-    schema = {
-        "headline_summary": "string (오늘 핵심 이벤트 1~2문장)",
-        "market_implication": "string (시장 시사점 1문장)",
-        "macro_drivers": ["string"],
-        "risk_level_label": "낮음|보통|높음",
-    }
+    schema = (
+        '{\n'
+        '  "headline_summary": "오늘 핵심 이벤트 1~2문장",\n'
+        '  "macro_drivers": ["driver1", "driver2"],\n'
+        '  "market_implication": "시장 시사점 1문장",\n'
+        '  "risk_level": "LOW|MODERATE|HIGH",\n'
+        '  "risk_level_label": "낮음|보통|높음"\n'
+        '}'
+    )
     return (
         "당신은 투자 대시보드용 이벤트 요약기입니다.\n"
         "오늘 일어난 핵심 이벤트를 간결하게 요약하세요.\n"
         "해석이나 전략 제안은 하지 마세요. 사실만 요약하세요.\n"
-        "한국어로 작성하세요. JSON 외 텍스트 금지.\n\n"
+        "한국어로 작성하세요.\n\n"
+        "[엄격 규칙]\n"
+        "- 반드시 JSON 객체 하나만 반환하세요.\n"
+        "- 코드 블록(```)을 사용하지 마세요.\n"
+        "- JSON 앞뒤에 설명 문장을 추가하지 마세요.\n"
+        "- trailing comma를 사용하지 마세요.\n"
+        "- 아래 스키마에 없는 필드를 추가하지 마세요.\n\n"
         "[입력 데이터]\n"
         f"{json.dumps(payload, ensure_ascii=False)}\n\n"
-        "[아래 스키마의 JSON으로만 출력]\n"
-        f"{json.dumps(schema, ensure_ascii=False)}"
+        "[출력 스키마 — 이 형태의 JSON만 반환]\n"
+        f"{schema}"
     )
+
+
+def _clean_json_like_text(raw: str) -> str:
+    """Sanitize common Gemini quirks so ``json.loads`` succeeds."""
+    s = raw
+    # smart / curly quotes → ASCII
+    s = s.replace("\u201c", '"').replace("\u201d", '"')
+    s = s.replace("\u2018", "'").replace("\u2019", "'")
+    # trailing commas before } or ]
+    s = re.sub(r",\s*([}\]])", r"\1", s)
+    # stray BOM / zero-width chars
+    s = s.replace("\ufeff", "").replace("\u200b", "")
+    return s.strip()
 
 
 def _parse_gemini_output(text: str) -> dict | None:
     raw = (text or "").strip()
     if not raw:
         return None
-    for m in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", raw, flags=re.IGNORECASE):
-        block = (m.group(1) or "").strip()
-        if block:
-            raw = block
-            break
+
+    # 1) strip fenced code blocks if present
+    m_fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw, re.IGNORECASE)
+    if m_fence:
+        raw = (m_fence.group(1) or "").strip()
+
+    # 2) sanitize
+    raw = _clean_json_like_text(raw)
+
+    # 3) try full text as JSON
     try:
         obj = json.loads(raw)
         if isinstance(obj, dict):
             return obj
     except Exception:
         pass
-    m = re.search(r"\{[\s\S]*\}", raw)
-    if m:
+
+    # 4) extract first { ... } block
+    m_obj = re.search(r"\{[\s\S]*\}", raw)
+    if m_obj:
+        candidate = _clean_json_like_text(m_obj.group(0))
         try:
-            obj = json.loads(m.group(0))
+            obj = json.loads(candidate)
             if isinstance(obj, dict):
                 return obj
         except Exception:
             pass
+
     return None
 
 
@@ -125,14 +156,24 @@ def detect_events(
     except Exception as e:
         return {**GEMINI_FALLBACK, **meta, "_debug_error": f"api_error:{type(e).__name__}:{e}"}
 
+    # Debug logging (dev only)
+    print(f"GEMINI RAW RESPONSE ({len(text)} chars):", text[:500])
+
     parsed = _parse_gemini_output(text)
     if not parsed:
         return {**GEMINI_FALLBACK, **meta, "_debug_error": "parse_error"}
 
+    # Normalize macro_drivers to list
+    drivers = parsed.get("macro_drivers", [])
+    if isinstance(drivers, str):
+        drivers = [d.strip() for d in drivers.split(",") if d.strip()] if drivers else []
+    elif not isinstance(drivers, list):
+        drivers = []
+
     result = {
         "headline_summary": str(parsed.get("headline_summary", "")).strip()
             or GEMINI_FALLBACK["headline_summary"],
-        "macro_drivers": parsed.get("macro_drivers", []),
+        "macro_drivers": drivers,
         "market_implication": str(parsed.get("market_implication", "")).strip(),
         "risk_level": str(parsed.get("risk_level", "MODERATE")),
         "risk_level_label": str(parsed.get("risk_level_label", "보통")),

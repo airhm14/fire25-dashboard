@@ -1856,26 +1856,28 @@ with tab3:
         _bias_colors = {"risk_on": "#10b981", "risk_off": "#ef4444", "neutral": "#94a3b8"}
         _bias_color = _bias_colors.get(_macro_bias, "#94a3b8")
         _asset_bias = _n_snap.get("asset_bias", {})
-        st.markdown(f"""
-        <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
-                    border:1px solid #3b82f6;border-radius:12px;padding:20px;margin-bottom:16px;">
-            <div style="display:flex;align-items:center;margin-bottom:12px;">
-                <span style="font-size:1.3em;margin-right:8px;">💎</span>
-                <span style="color:#60a5fa;font-weight:700;font-size:1.1em;">Gemini 이벤트 브리프</span>
-                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{_gem_src} · {_gem_model}</span>
-            </div>
-            <p style="color:#e2e8f0;margin:0 0 12px 0;line-height:1.6;">{_gem_headline}</p>
-            <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.8em;color:#94a3b8;
-                        border-top:1px solid #334155;padding-top:10px;">
-                <span>📰 원본: {_raw_cnt}건</span>
-                <span>🔍 이벤트: {_dedup_cnt}개</span>
-                <span>🧭 매크로: <b style="color:{_bias_color};">{_macro_bias}</b></span>
-                <span>🔑 snap: <code style="color:#60a5fa;">{_snap_hash}</code></span>
-            </div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:0.78em;color:#94a3b8;margin-top:6px;">
-                {"".join(f'<span>{a}: <b style="color:{"#10b981" if v > 0 else "#ef4444" if v < 0 else "#94a3b8"};">{v:+d}</b></span>' for a, v in _asset_bias.items())}
-            </div>
-        </div>""", unsafe_allow_html=True)
+        _ab_spans = ""
+        for _ab_asset, _ab_val in _asset_bias.items():
+            _ab_c = "#10b981" if _ab_val > 0 else "#ef4444" if _ab_val < 0 else "#94a3b8"
+            _ab_spans += f'<span>{_ab_asset}: <b style="color:{_ab_c};">{_ab_val:+d}</b></span> '
+        _ab_row = ""
+        if _ab_spans:
+            _ab_row = f'<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:0.78em;color:#94a3b8;margin-top:6px;">{_ab_spans}</div>'
+        st.markdown(f"""<div style="background:linear-gradient(135deg,#1e293b,#0f172a);border:1px solid #3b82f6;border-radius:12px;padding:20px;margin-bottom:16px;">
+<div style="display:flex;align-items:center;margin-bottom:12px;">
+<span style="font-size:1.3em;margin-right:8px;">💎</span>
+<span style="color:#60a5fa;font-weight:700;font-size:1.1em;">Gemini 이벤트 브리프</span>
+<span style="color:#475569;font-size:0.8em;margin-left:auto;">{_gem_src} · {_gem_model}</span>
+</div>
+<p style="color:#e2e8f0;margin:0 0 12px 0;line-height:1.6;">{_gem_headline}</p>
+<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.8em;color:#94a3b8;border-top:1px solid #334155;padding-top:10px;">
+<span>📰 원본: {_raw_cnt}건</span>
+<span>🔍 이벤트: {_dedup_cnt}개</span>
+<span>🧭 매크로: <b style="color:{_bias_color};">{_macro_bias}</b></span>
+<span>🔑 snap: <code style="color:#60a5fa;">{_snap_hash}</code></span>
+</div>
+{_ab_row}
+</div>""", unsafe_allow_html=True)
 
         # ── Claude vs GPT 비교 ──
         _cr = orch_result.get("claude_raw") or {}

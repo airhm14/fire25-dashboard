@@ -53,6 +53,7 @@ _EXTRACT_PROMPT = """당신은 투자 뉴스 이벤트 추출기입니다.
 - JSON 앞뒤에 설명 문장을 추가하지 마세요.
 - trailing comma를 사용하지 마세요.
 - 같은 사건을 다룬 뉴스는 하나의 이벤트로 병합하세요.
+- summary 필드는 반드시 한국어로 작성하세요.
 
 [event_type 허용 목록 — 이 중에서만 선택]
 {event_types}
@@ -83,7 +84,7 @@ _EXTRACT_PROMPT = """당신은 투자 뉴스 이벤트 추출기입니다.
     "severity": 1~5,
     "asset_relevance": ["QQQM", "SCHD"],
     "macro_tags": ["태그1", "태그2"],
-    "summary": "사실 위주 1문장 요약"
+    "summary": "사실 위주 한국어 1문장 요약"
   }}
 ]"""
 
@@ -345,7 +346,9 @@ def _build_headline_from_snapshot(snapshot: dict) -> str:
     parts = []
     for ev in top[:3]:
         d_mark = {"bullish": "📈", "bearish": "📉"}.get(ev.get("impact_direction", ""), "➡️")
-        parts.append(f"{d_mark} [{ev.get('event_type', '')}] {ev.get('title', '')}")
+        # summary(한국어)가 있으면 사용, 없으면 title fallback
+        label = ev.get("summary") or ev.get("title", "")
+        parts.append(f"{d_mark} [{ev.get('event_type', '')}] {label}")
     return " | ".join(parts)
 
 

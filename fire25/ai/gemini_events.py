@@ -218,7 +218,8 @@ def detect_events(
 
         cfg = types.GenerateContentConfig(
             temperature=0.2,
-            max_output_tokens=800,
+            max_output_tokens=8192,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         )
         resp = client.models.generate_content(
             model=_model_name,

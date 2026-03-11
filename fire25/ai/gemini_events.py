@@ -150,6 +150,7 @@ def detect_events(
             config=types.GenerateContentConfig(
                 temperature=0.2,
                 max_output_tokens=800,
+                response_mime_type="application/json",
             ),
         )
         text = getattr(response, "text", "") or ""

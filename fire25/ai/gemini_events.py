@@ -110,16 +110,31 @@ def _parse_gemini_output(text: str) -> dict | None:
 
 
 def _extract_gemini_text(response: Any) -> str:
-    """Robustly extract text from a google-genai response object."""
-    # 1) .text convenience property
+    """Robustly extract text from a google-genai response object.
+
+    gemini-2.5-flash is a 'thinking' model — its response may contain
+    multiple parts: a Thought part followed by the actual output part.
+    We iterate all parts and return the first one that looks like JSON.
+    """
+    # 1) Try all parts in candidates (thinking models put JSON in a later part)
+    try:
+        parts = response.candidates[0].content.parts
+        # prefer a part that starts with '{'
+        for part in parts:
+            t = getattr(part, "text", None) or ""
+            if t.strip().startswith("{"):
+                return t
+        # fallback: return last non-empty part (usually the output, not thought)
+        for part in reversed(parts):
+            t = getattr(part, "text", None) or ""
+            if t.strip():
+                return t
+    except Exception:
+        pass
+    # 2) .text convenience property
     text = getattr(response, "text", None)
     if text:
         return text
-    # 2) drill into candidates structure
-    try:
-        return response.candidates[0].content.parts[0].text
-    except Exception:
-        pass
     # 3) last resort: stringify
     try:
         return str(response)
@@ -162,16 +177,47 @@ def detect_events(
     try:
         _model_name = model or get_model_name("gemini")
         client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=_model_name,
-            contents=_build_prompt(payload),
-            config=types.GenerateContentConfig(
-                temperature=0.2,
-                max_output_tokens=800,
-                response_mime_type="application/json",
-            ),
-        )
-        text = _extract_gemini_text(response)
+
+        # First attempt: with response_mime_type (may not work on thinking models)
+        text = ""
+        _diag = ""
+        for _attempt, _mime in enumerate(["application/json", None]):
+            try:
+                cfg_kwargs: dict[str, Any] = {
+                    "temperature": 0.2,
+                    "max_output_tokens": 800,
+                }
+                if _mime:
+                    cfg_kwargs["response_mime_type"] = _mime
+                resp = client.models.generate_content(
+                    model=_model_name,
+                    contents=_build_prompt(payload),
+                    config=types.GenerateContentConfig(**cfg_kwargs),
+                )
+                # Diagnose response structure
+                _cands = resp.candidates or []
+                _parts_info = ""
+                if _cands and _cands[0].content and _cands[0].content.parts:
+                    _ps = _cands[0].content.parts
+                    _parts_info = f"parts={len(_ps)}"
+                    for _pi, _pp in enumerate(_ps):
+                        _pt = getattr(_pp, "text", None) or ""
+                        _th = getattr(_pp, "thought", None)
+                        _parts_info += f",p{_pi}:thought={_th}/len={len(_pt)}"
+                else:
+                    _parts_info = f"cands={len(_cands)}"
+                _diag = f"attempt={_attempt},mime={_mime},{_parts_info}"
+
+                text = _extract_gemini_text(resp)
+                if text and text.strip():
+                    break  # got usable text
+            except Exception as inner_e:
+                _diag = f"attempt={_attempt},mime={_mime},err={type(inner_e).__name__}:{inner_e}"
+                continue
+
+        if not text or not text.strip():
+            return {**GEMINI_FALLBACK, **meta,
+                    "_debug_error": f"empty_response|{_diag}"}
     except Exception as e:
         return {**GEMINI_FALLBACK, **meta, "_debug_error": f"api_error:{type(e).__name__}:{e}"}
 
@@ -181,7 +227,9 @@ def detect_events(
 
     parsed = _parse_gemini_output(text)
     if not parsed:
-        return {**GEMINI_FALLBACK, **meta, "_debug_error": "parse_error"}
+        snippet = (text or "")[:120].replace("\n", " ")
+        return {**GEMINI_FALLBACK, **meta,
+                "_debug_error": f"parse_error|len={len(text or '')}|{snippet}"}
 
     # Normalize macro_drivers to list
     drivers = parsed.get("macro_drivers", [])

@@ -181,7 +181,6 @@ def detect_events(
         cfg = types.GenerateContentConfig(
             temperature=0.2,
             max_output_tokens=800,
-            response_mime_type="application/json",
         )
         resp = client.models.generate_content(
             model=_model_name,

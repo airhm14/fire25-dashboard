@@ -10,7 +10,7 @@ from __future__ import annotations
 MODEL_REGISTRY: dict[str, dict[str, str]] = {
     "openai":  {"default": "gpt-4o-mini"},
     "claude":  {"default": "claude-sonnet-4-6"},
-    "gemini":  {"default": "gemini-2.0-flash"},
+    "gemini":  {"default": "gemini-2.5-flash"},
 }
 
 

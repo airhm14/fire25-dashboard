@@ -1799,25 +1799,22 @@ with tab3:
     st.markdown("---")
 
     # =================================================================
-    # B. AI 오케스트레이션 레이어 — 사실을 요약/해석/전략으로 연결
-    #    ※ 각 AI는 자기 역할만 수행한다 (중복 금지).
-    #      Gemini → 이벤트 요약 | Claude → 거시 해석 | OpenAI → 전략 제안
+    # B. AI 전략 오케스트레이터 (통합)
+    #    Regime Gate → Gemini(뉴스) → Claude+GPT(독립 전략) → 합의/토론
+    #    → Manual Guard → Strategy Stabilizer → 실행 계획
     # =================================================================
-    st.markdown("""<p style='color:#64748b; font-size:0.85em; letter-spacing:0.05em;
-        margin-bottom:4px;'>🤖 <b>AI 오케스트레이션 레이어</b> — Gemini · Claude · OpenAI</p>""",
+    st.markdown("""<p style='color:#f59e0b; font-size:0.85em; letter-spacing:0.05em;
+        margin-bottom:4px;'>⚡ <b>AI 전략 오케스트레이터</b> — Regime Gate · Gemini · Claude vs GPT · Manual Guard</p>""",
         unsafe_allow_html=True)
 
-    if st.button("AI 분석 실행", width='stretch', key="ai_orch"):
-        gemini_key = st.secrets.get("GEMINI_API_KEY", "")
-        claude_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-        openai_key = st.secrets.get("OPENAI_API_KEY", "")
-        models_config = dict(st.secrets.get("models", {}))
+    if st.button("🚀 AI 전략 실행", width='stretch', key="ai_orch"):
+        _gemini_key = st.secrets.get("GEMINI_API_KEY", "")
+        _claude_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+        _openai_key = st.secrets.get("OPENAI_API_KEY", "")
+        _models_cfg = dict(st.secrets.get("models", {}))
 
-        from fire25.ai.decision_context_builder import build_decision_context
-        from fire25.ai.ai_router import run_all as ai_run_all
-        from fire25.ai.ai_formatter import (
-            format_gemini_section, format_claude_section, format_openai_section,
-        )
+        from fire25.engine.orchestrator import run as orchestrator_run
+        from fire25.strategy_v2.portfolio_strategy import build_portfolio_input
 
         _qqqm_sma200 = _safe_float(qqqm_data.get("sma_200"), 0.0)
         _qqqm_price = _safe_float(qqqm_data.get("price"), 0.0)
@@ -1826,155 +1823,6 @@ with tab3:
             if _qqqm_sma200 > 0 else 0.0
         )
         _cash_level = "높음" if cash_pct >= 15 else ("중간" if cash_pct >= 8 else "낮음")
-
-        decision_ctx = build_decision_context(
-            portfolio_weight={
-                "QQQM": round(qqqm_pct, 2), "SCHD": round(schd_pct, 2),
-                "IAU": round(iau_pct, 2), "SGOV+현금": round(cash_pct, 2),
-            },
-            target_weight={"QQQM": 72.0, "SCHD": 16.0, "IAU": 2.0, "SGOV+현금": 10.0},
-            cash_level=_cash_level,
-            vix=_safe_float((vix_data or {}).get("price"), 20.0),
-            fear_greed=_safe_int((fng_data or {}).get("value"), 50),
-            qqqm_rsi=_safe_float(qqqm_data.get("rsi"), 50.0),
-            qqqm_sma200_gap=round(_sma200_gap, 2),
-            treasury_10y=_safe_float((tnx_data or {}).get("price"), 0.0),
-            oil_price=_safe_float((oil_data or {}).get("price"), 0.0),
-            regime=str(regime_info.get("regime", "CORRECTION")),
-            macro_summary_text=short_korean(str(macro_summary.get("implication", "")), 2),
-            news_summary_text=short_korean(str(nb.get("headline_summary", "")), 2),
-            news_brief=nb,
-            shock_events=shock_events,
-            risk_radar=radar,
-        )
-
-        with st.spinner("AI 분석 중..."):
-            ai_results = ai_run_all(
-                decision_context=decision_ctx,
-                articles=market_news,
-                aggregated_signals=nb.get("aggregated_signals", {}),
-                theme_info=nb.get("theme_info", {}),
-                asset_focus="growth",
-                openai_api_key=openai_key,
-                claude_api_key=claude_key,
-                gemini_api_key=gemini_key,
-                models_config=models_config,
-            )
-
-        # ── 4. Gemini 이벤트 브리프 ──
-        # 역할: 오늘 무슨 일이 있었는가? (이벤트 요약만, 해석 최소화)
-        gf = format_gemini_section(ai_results["gemini"])
-        st.markdown(f"""
-        <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
-                    border:1px solid #3b82f6;border-radius:12px;padding:20px;margin-bottom:16px;">
-            <div style="display:flex;align-items:center;margin-bottom:12px;">
-                <span style="font-size:1.3em;margin-right:8px;">💎</span>
-                <span style="color:#60a5fa;font-weight:700;font-size:1.1em;">Gemini 이벤트 브리프</span>
-                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{gf['source']} · {ai_results['gemini'].get('_model','')}</span>
-            </div>
-            <p style="color:#e2e8f0;margin:0;line-height:1.6;">{gf['headline']}</p>
-        </div>""", unsafe_allow_html=True)
-
-        # ── 5. Claude 거시 해석 ──
-        # 역할: 그 일이 시장에 어떤 의미가 있는가? (거시 해석만, 전략 금지)
-        cf = format_claude_section(ai_results["claude"])
-        st.markdown(f"""
-        <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
-                    border:1px solid #a855f7;border-radius:12px;padding:20px;margin-bottom:16px;">
-            <div style="display:flex;align-items:center;margin-bottom:12px;">
-                <span style="font-size:1.3em;margin-right:8px;">🔮</span>
-                <span style="color:#c084fc;font-weight:700;font-size:1.1em;">Claude 거시 해석</span>
-                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{cf['source']} · {ai_results['claude'].get('_model','')}</span>
-            </div>
-            <p style="color:#e2e8f0;margin:0 0 8px;line-height:1.6;">{cf['macro_view']}</p>
-            <p style="color:#f87171;font-size:0.9em;margin:4px 0;">⚠ 핵심 리스크: {cf['key_risk']}</p>
-            <p style="color:#34d399;font-size:0.9em;margin:4px 0;">💡 기회 요인: {cf['opportunity']}</p>
-        </div>""", unsafe_allow_html=True)
-
-        # ── 6. OpenAI 오늘의 전략 ──
-        # 역할: 그래서 지금 어떻게 대응할까? (전략의 최종 요약자)
-        of = format_openai_section(ai_results["openai"])
-        st.markdown(f"""
-        <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
-                    border:1px solid #10b981;border-radius:12px;padding:20px;margin-bottom:8px;">
-            <div style="display:flex;align-items:center;margin-bottom:12px;">
-                <span style="font-size:1.3em;margin-right:8px;">🧠</span>
-                <span style="color:#34d399;font-weight:700;font-size:1.1em;">OpenAI 오늘의 전략</span>
-                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{of['source']} · {ai_results['openai'].get('_model','')}</span>
-            </div>
-        </div>""", unsafe_allow_html=True)
-
-        d1, d2, d3 = st.columns(3)
-        d1.metric("하락 확률", f"{of['dip_probability']}%")
-        d2.metric("리스크", of['risk_level'])
-        d3.metric("신뢰도", of['confidence'])
-
-        a1, a2 = st.columns(2)
-        with a1:
-            st.markdown(f"""
-            <div style="background:#1e293b;border-radius:8px;padding:12px;margin-bottom:8px;">
-                <p style="color:#94a3b8;font-size:0.8em;margin:0 0 4px;">오늘의 시장</p>
-                <p style="color:#e2e8f0;margin:0;">{of.get('market_view','데이터 부족')}</p>
-            </div>
-            <div style="background:#1e293b;border-radius:8px;padding:12px;">
-                <p style="color:#f59e0b;font-size:0.8em;margin:0 0 4px;">Shield 경보</p>
-                <p style="color:#e2e8f0;margin:0;">{of.get('shield_alert','데이터 부족')}</p>
-            </div>""", unsafe_allow_html=True)
-        with a2:
-            st.markdown(f"""
-            <div style="background:#1e293b;border-radius:8px;padding:12px;margin-bottom:8px;">
-                <p style="color:#3b82f6;font-size:0.8em;margin:0 0 4px;">웅줍 신호</p>
-                <p style="color:#e2e8f0;margin:0;">{of.get('dip_signal','데이터 부족')}</p>
-            </div>
-            <div style="background:#1e293b;border-radius:8px;padding:12px;">
-                <p style="color:#10b981;font-size:0.8em;margin:0 0 4px;">다음 액션</p>
-                <p style="color:#e2e8f0;margin:0;">{of.get('action','데이터 부족')}</p>
-            </div>""", unsafe_allow_html=True)
-
-        # ── AI 상태 진단 ──
-        def _status_dot(src, err):
-            if src and src != "fallback":
-                return "🟢", "정상"
-            if err:
-                return "🔴", str(err)
-            return "🟡", "fallback"
-
-        _g_dot, _g_msg = _status_dot(gf.get("_source"), gf.get("_debug_error"))
-        _c_dot, _c_msg = _status_dot(cf.get("_source"), cf.get("_debug_error"))
-        _o_dot, _o_msg = _status_dot(of.get("_source"), of.get("_debug_error"))
-        with st.expander("AI 상태 진단", expanded=False):
-            st.markdown(f"{_g_dot} **Gemini** (`{ai_results['gemini'].get('_model','')}`) — {_g_msg}")
-            st.markdown(f"{_c_dot} **Claude** (`{ai_results['claude'].get('_model','')}`) — {_c_msg}")
-            st.markdown(f"{_o_dot} **OpenAI** (`{ai_results['openai'].get('_model','')}`) — {_o_msg}")
-            st.caption("🟢 정상 | 🟡 fallback (키 없음/SDK 없음) | 🔴 오류")
-
-    st.markdown("---")
-
-    # =================================================================
-    # C. AI 전략 오케스트레이터 — Manual 30 / AI 70
-    #    Regime Gate → Gemini(뉴스) → Claude+GPT(독립 전략) → 합의/토론 → 실행 계획
-    # =================================================================
-    st.markdown("""<p style='color:#f59e0b; font-size:0.85em; letter-spacing:0.05em;
-        margin-bottom:4px;'>⚡ <b>AI 전략 오케스트레이터</b> — Regime Gate · Claude vs GPT · Manual Guard</p>""",
-        unsafe_allow_html=True)
-
-    if st.button("🚀 AI 전략 실행", key="ai_v2_orch"):
-        _gemini_key = st.secrets.get("GEMINI_API_KEY", "")
-        _claude_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-        _openai_key = st.secrets.get("OPENAI_API_KEY", "")
-        _models_cfg = dict(st.secrets.get("models", {}))
-
-        from fire25.engine.orchestrator import run as orchestrator_run
-        from fire25.strategy_v2.portfolio_strategy import build_portfolio_input
-        from fire25.ai.decision_context_builder import build_decision_context
-
-        _qqqm_sma200_v2 = _safe_float(qqqm_data.get("sma_200"), 0.0)
-        _qqqm_price_v2 = _safe_float(qqqm_data.get("price"), 0.0)
-        _sma200_gap_v2 = (
-            (_qqqm_price_v2 - _qqqm_sma200_v2) / _qqqm_sma200_v2 * 100.0
-            if _qqqm_sma200_v2 > 0 else 0.0
-        )
-        _cash_level_v2 = "높음" if cash_pct >= 15 else ("중간" if cash_pct >= 8 else "낮음")
 
         _portfolio_input = build_portfolio_input(
             qqqm_shares=qqqm_qty,
@@ -1988,15 +1836,15 @@ with tab3:
             sgov_price=_safe_float(sgov_data.get("price"), 0.0) if sgov_data else 0.0,
         )
 
-        _macro_ctx_v2 = {
+        _macro_ctx = {
             "VIX": _safe_float((vix_data or {}).get("price"), 20.0),
             "fear_greed": _safe_int((fng_data or {}).get("value"), 50),
             "QQQM_RSI": _safe_float(qqqm_data.get("rsi"), 50.0),
-            "QQQM_SMA200_gap": round(_sma200_gap_v2, 2),
+            "QQQM_SMA200_gap": round(_sma200_gap, 2),
             "10Y_treasury": _safe_float((tnx_data or {}).get("price"), 0.0),
             "oil_price": _safe_float((oil_data or {}).get("price"), 0.0),
             "regime": str(regime_info.get("regime", "CORRECTION")),
-            "cash_level": _cash_level_v2,
+            "cash_level": _cash_level,
             "macro_summary": short_korean(str(macro_summary.get("implication", "")), 2),
         }
 
@@ -2015,7 +1863,7 @@ with tab3:
                 aggregated_signals=nb.get("aggregated_signals", {}),
                 theme_info=nb.get("theme_info", {}),
                 portfolio=_portfolio_input,
-                macro_context=_macro_ctx_v2,
+                macro_context=_macro_ctx,
                 news_summary=_news_text,
                 gemini_api_key=_gemini_key,
                 claude_api_key=_claude_key,
@@ -2033,19 +1881,39 @@ with tab3:
             "SMART_SHOULDER": "#f97316",
         }
         _rc = _regime_colors.get(_regime_name, "#94a3b8")
+        _persist_tag = " ⏳ 확인 대기중" if _rg.get("persistence_pending") else ""
+        _consistency_tag = ""
+        if orch_result.get("strategy_consistency") == "regime_unchanged":
+            _consistency_tag = " · 📌 이전 전략 유지 (Regime 미변경)"
         st.markdown(f"""
         <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
                     border:2px solid {_rc};border-radius:12px;padding:16px;margin-bottom:16px;">
             <div style="display:flex;align-items:center;gap:12px;">
                 <span style="background:{_rc};color:white;padding:4px 12px;border-radius:6px;
-                             font-weight:700;font-size:1.1em;">{_regime_name}</span>
+                             font-weight:700;font-size:1.1em;">{_regime_name}{_persist_tag}</span>
                 <span style="color:#94a3b8;font-size:0.9em;">
-                    신뢰도 {int(_rg.get('confidence', 0) * 100)}% | API {orch_result.get('api_calls', 0)}콜
+                    신뢰도 {int(_rg.get('confidence', 0) * 100)}% | API {orch_result.get('api_calls', 0)}콜{_consistency_tag}
                 </span>
             </div>
             <p style="color:#cbd5e1;margin:8px 0 0;font-size:0.85em;">
                 {' / '.join(_rg.get('reasons', []))}
             </p>
+        </div>""", unsafe_allow_html=True)
+
+        # ── Gemini 이벤트 브리프 ──
+        _gemini_data = orch_result.get("gemini", {})
+        _gem_src = _gemini_data.get("_source", "fallback")
+        _gem_headline = _gemini_data.get("headline_summary", "뉴스 요약 없음")
+        _gem_model = _gemini_data.get("_model", "")
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
+                    border:1px solid #3b82f6;border-radius:12px;padding:20px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;margin-bottom:12px;">
+                <span style="font-size:1.3em;margin-right:8px;">💎</span>
+                <span style="color:#60a5fa;font-weight:700;font-size:1.1em;">Gemini 이벤트 브리프</span>
+                <span style="color:#475569;font-size:0.8em;margin-left:auto;">{_gem_src} · {_gem_model}</span>
+            </div>
+            <p style="color:#e2e8f0;margin:0;line-height:1.6;">{_gem_headline}</p>
         </div>""", unsafe_allow_html=True)
 
         # ── Claude vs GPT 비교 ──
@@ -2133,11 +2001,20 @@ with tab3:
                     _cost_str = f" (≈${_ord['estimated_proceeds']:,.0f})"
                 st.markdown(f"{_act_emoji} **{_ord['ticker']}** {_ord['action']} {_ord.get('shares',0)}주{_cost_str}")
 
+        # ── Strategy Stabilizer 노트 ──
+        _stab_notes = _exec.get("stabilizer_applied", [])
+        if _stab_notes:
+            with st.expander("⚖️ Strategy Stabilizer 적용 내역", expanded=False):
+                for _sn in _stab_notes:
+                    st.markdown(f"- {_sn}")
+
+        _puddle_pct = _exec.get("puddle_deploy_pct")
+        _puddle_tag = f" | PUDDLE 투입률: {_puddle_pct:.0f}%" if _puddle_pct is not None else ""
         st.markdown(f"""
         <div style="background:#1e293b;border-radius:8px;padding:12px;margin-top:8px;">
             <p style="color:#94a3b8;font-size:0.85em;margin:0;">
                 {_exec.get('summary', '변동 없음')} | 현금 잔여: ${_exec.get('remaining_cash', 0):,.0f}
-                | 현금 전략: {_final.get('cash_action', 'KEEP')} | 신뢰도: {_final.get('confidence_score', 0)}
+                | 현금 전략: {_final.get('cash_action', 'KEEP')} | 신뢰도: {_final.get('confidence_score', 0)}{_puddle_tag}
             </p>
         </div>""", unsafe_allow_html=True)
 
@@ -2148,9 +2025,25 @@ with tab3:
             st.error(f"🛡 매뉴얼 가드 발동: {', '.join(_final_v)}")
         if _final.get("_guard_corrected"):
             st.warning("전략이 매뉴얼 규칙에 의해 보정되었습니다 (전 종목 HOLD).")
+        if orch_result.get("puddle_cooldown_blocked"):
+            st.info("🕐 동일 PUDDLE 단계 30일 쿨다운 — 매수 차단됨")
 
-        # ── 상세 진단 ──
-        with st.expander("🔍 AI 전략 상세 진단", expanded=False):
+        # ── AI 상태 진단 ──
+        def _status_dot(src, err):
+            if src and src != "fallback":
+                return "🟢", "정상"
+            if err:
+                return "🔴", str(err)
+            return "🟡", "fallback"
+
+        _gem_dot, _gem_msg = _status_dot(_gemini_data.get("_source"), _gemini_data.get("_debug_error"))
+        _c_dot, _c_msg = _status_dot(_cr.get("_source"), _cr.get("_debug_error"))
+        _g_dot, _g_msg = _status_dot(_gr.get("_source"), _gr.get("_debug_error"))
+        with st.expander("🔍 AI 상태 진단", expanded=False):
+            st.markdown(f"{_gem_dot} **Gemini** (`{_gem_model}`) — {_gem_msg}")
+            st.markdown(f"{_c_dot} **Claude** (`{_cr.get('_agent','')}`) — {_c_msg}")
+            st.markdown(f"{_g_dot} **GPT** (`{_gr.get('_agent','')}`) — {_g_msg}")
+            st.caption("🟢 정상 | 🟡 fallback (키 없음/SDK 없음) | 🔴 오류")
             st.json(orch_result)
 
     st.markdown("---")

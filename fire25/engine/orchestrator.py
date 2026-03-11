@@ -3,13 +3,14 @@
 
 흐름:
   1. 시장데이터/포트폴리오 수집 (외부에서 전달)
-  2. regime_gate 실행
+  2. regime_gate 실행 (persistence filter 포함)
   3. Gemini 뉴스 수집
   4. Claude/GPT 독립 전략 생성
   5. manual_guard로 매뉴얼 위반 여부 검사
   6. conflict_detector로 합의 여부 판정
   7. 충돌 시 discussion_engine 실행
-  8. 최종 전략 출력
+  8. 전략 안정성 검증 (Strategy Stabilizer)
+  9. 최종 전략 출력
 
 기본 3콜, 충돌 시 5콜.
 """
@@ -23,8 +24,13 @@ from fire25.engine.regime_gate import classify as classify_regime, RegimeResult
 from fire25.engine.conflict_detector import detect as detect_conflict, ConflictResult
 from fire25.engine.discussion_engine import run_discussion
 from fire25.strategy_v2.manual_guard import validate as manual_guard_validate
+from fire25.strategy_v2.manual_guard import check_puddle_cooldown, record_puddle_buy
 from fire25.strategy_v2.execution_plan import build_plan
 from fire25.agents import gemini_agent, claude_agent, gpt_agent
+
+# ── Module-level state for strategy consistency ──────────────────
+_prev_regime: str = ""
+_prev_strategy: dict[str, Any] | None = None
 
 
 def run(
@@ -36,6 +42,10 @@ def run(
     smart_shoulder_triggered: bool = False,
     market_regime: str = "CORRECTION",
     market_confidence: float = 0.5,
+    # --- Advanced regime inputs ---
+    drawdown_pct: float = 0.0,
+    vix: float = 20.0,
+    sma50_slope: float = 0.0,
     # --- News data ---
     articles: list[dict] | None = None,
     aggregated_signals: dict | None = None,
@@ -63,7 +73,10 @@ def run(
       - final_strategy: Post-guard final strategy
       - discussion: Discussion metadata (if triggered)
       - api_calls: Number of API calls made
+      - strategy_consistency: Whether previous strategy was maintained
     """
+    global _prev_regime, _prev_strategy
+
     from fire25.ai.model_registry import get_model_name
 
     _gemini_model = get_model_name("gemini", models_config)
@@ -81,9 +94,11 @@ def run(
         "discussion": None,
         "guard_violations": [],
         "api_calls": 0,
+        "strategy_consistency": None,
+        "puddle_cooldown_blocked": False,
     }
 
-    # ── Step 1: Regime Gate ──────────────────────────────────────
+    # ── Step 1: Regime Gate (with persistence filter) ────────────
     regime_result: RegimeResult = classify_regime(
         defcon_triggered=defcon_triggered,
         puddle_stage=puddle_stage,
@@ -91,9 +106,35 @@ def run(
         smart_shoulder_triggered=smart_shoulder_triggered,
         market_regime=market_regime,
         market_confidence=market_confidence,
+        drawdown_pct=drawdown_pct,
+        vix=vix,
+        sma50_slope=sma50_slope,
     )
     result["regime"] = regime_result.to_dict()
     regime = regime_result.regime
+
+    # ── Step 1b: Strategy consistency check ──────────────────────
+    if _prev_regime and regime == _prev_regime and _prev_strategy:
+        result["strategy_consistency"] = "regime_unchanged"
+        # If regime hasn't changed, return previous strategy (일관성)
+        final = {**_prev_strategy, "_source": "consistency", "_consistency_note": "Regime 미변경 → 이전 전략 유지"}
+        final["execution_plan"] = build_plan(
+            strategy=final,
+            portfolio=portfolio or _default_portfolio(),
+            regime=regime,
+        )
+        result["final_strategy"] = final
+        result["api_calls"] = 0
+        return result
+
+    # ── Step 1c: PUDDLE duplicate buy cooldown ───────────────────
+    if regime.startswith("PUDDLE_"):
+        try:
+            stage = int(regime.split("_")[1])
+        except (IndexError, ValueError):
+            stage = 0
+        if check_puddle_cooldown(stage):
+            result["puddle_cooldown_blocked"] = True
 
     # ── Step 2: Gemini News ──────────────────────────────────────
     gemini_result = gemini_agent.run(
@@ -138,15 +179,17 @@ def run(
     result["gpt_raw"] = gpt_result
 
     # ── Step 4: Manual Guard check ───────────────────────────────
-    claude_violations = manual_guard_validate(claude_result, regime)
-    gpt_violations = manual_guard_validate(gpt_result, regime)
+    claude_violations = manual_guard_validate(claude_result, regime, portfolio=_portfolio)
+    gpt_violations = manual_guard_validate(gpt_result, regime, portfolio=_portfolio)
     result["guard_violations"] = {
         "claude": claude_violations,
         "gpt": gpt_violations,
     }
 
-    # ── Step 5: Conflict Detection ───────────────────────────────
-    conflict: ConflictResult = detect_conflict(claude_result, gpt_result)
+    # ── Step 5: Conflict Detection (with portfolio context) ──────
+    conflict: ConflictResult = detect_conflict(
+        claude_result, gpt_result, portfolio=_portfolio,
+    )
     result["conflict"] = conflict.to_dict()
 
     # ── Step 6: Discussion if needed ─────────────────────────────
@@ -172,22 +215,50 @@ def run(
         result["discussion"] = final.get("_discussion")
 
     # ── Step 7: Final Manual Guard pass ──────────────────────────
-    final_violations = manual_guard_validate(final, regime)
+    final_violations = manual_guard_validate(final, regime, portfolio=_portfolio)
     if final_violations:
         final = _apply_guard_corrections(final, final_violations, regime)
     result["guard_violations"]["final"] = final_violations
 
-    # ── Step 8: Build execution plan ─────────────────────────────
+    # ── Step 8: PUDDLE cooldown enforcement ──────────────────────
+    if result["puddle_cooldown_blocked"]:
+        _force_hold_buys(final)
+        final["_puddle_cooldown_note"] = "동일 PUDDLE 단계 30일 쿨다운 → 매수 차단"
+
+    # ── Step 9: Build execution plan ─────────────────────────────
     final["execution_plan"] = build_plan(
         strategy=final,
         portfolio=_portfolio,
         regime=regime,
     )
 
+    # ── Step 10: Record PUDDLE buy & save state ──────────────────
+    if regime.startswith("PUDDLE_") and not result["puddle_cooldown_blocked"]:
+        has_buys = any(
+            str(a.get("action", "")).upper() == "BUY" and int(a.get("amount", 0)) > 0
+            for a in final.get("recommended_actions", [])
+        )
+        if has_buys:
+            try:
+                stage = int(regime.split("_")[1])
+                record_puddle_buy(stage)
+            except (IndexError, ValueError):
+                pass
+
+    _prev_regime = regime
+    _prev_strategy = final
     result["final_strategy"] = final
     result["api_calls"] = api_calls
 
     return result
+
+
+def _force_hold_buys(strategy: dict) -> None:
+    """Convert all BUY actions to HOLD (for cooldown enforcement)."""
+    for act in strategy.get("recommended_actions", []):
+        if str(act.get("action", "")).upper() == "BUY":
+            act["action"] = "HOLD"
+            act["amount"] = 0
 
 
 def _default_portfolio() -> dict:

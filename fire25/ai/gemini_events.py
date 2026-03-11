@@ -95,7 +95,7 @@ def _parse_gemini_output(text: str) -> dict | None:
     except Exception:
         pass
 
-    # 4) extract first { ... } block
+    # 4) extract first { ... } block (greedy — outermost braces)
     m_obj = re.search(r"\{[\s\S]*\}", raw)
     if m_obj:
         candidate = _clean_json_like_text(m_obj.group(0))
@@ -106,6 +106,30 @@ def _parse_gemini_output(text: str) -> dict | None:
         except Exception:
             pass
 
+    # 5) try to find valid JSON by scanning for each '{' and attempting parse
+    idx = 0
+    while idx < len(raw):
+        start = raw.find("{", idx)
+        if start == -1:
+            break
+        # find matching closing brace with nesting
+        depth = 0
+        for end in range(start, len(raw)):
+            if raw[end] == "{":
+                depth += 1
+            elif raw[end] == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = _clean_json_like_text(raw[start:end + 1])
+                    try:
+                        obj = json.loads(candidate)
+                        if isinstance(obj, dict) and "headline_summary" in obj:
+                            return obj
+                    except Exception:
+                        pass
+                    break
+        idx = start + 1
+
     return None
 
 
@@ -113,29 +137,43 @@ def _extract_gemini_text(response: Any) -> str:
     """Robustly extract text from a google-genai response object.
 
     gemini-2.5-flash is a 'thinking' model — its response may contain
-    multiple parts: a Thought part followed by the actual output part.
-    We iterate all parts and return the first one that looks like JSON.
+    multiple parts: a Thought part (thought=True) followed by the actual
+    output part.  We SKIP thought parts and only look at output parts.
     """
-    # 1) Try all parts in candidates (thinking models put JSON in a later part)
     try:
         parts = response.candidates[0].content.parts
-        # prefer a part that starts with '{'
+        # Separate output parts (thought=False/None) from thought parts
+        output_parts = []
+        all_texts = []
         for part in parts:
             t = getattr(part, "text", None) or ""
-            if t.strip().startswith("{"):
+            is_thought = getattr(part, "thought", None)
+            all_texts.append(t)
+            if not is_thought:
+                output_parts.append(t)
+
+        # 1) Among output parts, prefer one containing '{'
+        for t in output_parts:
+            if "{" in t:
                 return t
-        # fallback: return last non-empty part (usually the output, not thought)
-        for part in reversed(parts):
-            t = getattr(part, "text", None) or ""
+        # 2) Any non-empty output part
+        for t in reversed(output_parts):
+            if t.strip():
+                return t
+        # 3) If no output parts, try ALL parts for one with '{'
+        for t in all_texts:
+            if "{" in t:
+                return t
+        # 4) Last non-empty from all parts
+        for t in reversed(all_texts):
             if t.strip():
                 return t
     except Exception:
         pass
-    # 2) .text convenience property
+    # .text convenience property
     text = getattr(response, "text", None)
     if text:
         return text
-    # 3) last resort: stringify
     try:
         return str(response)
     except Exception:
@@ -190,10 +228,17 @@ def detect_events(
         text = _extract_gemini_text(resp)
 
         if not text or not text.strip():
+            # Gather diagnostic info about response structure
             _cands = resp.candidates or []
-            _parts_info = f"cands={len(_cands)}"
+            _diag_parts = []
             if _cands and _cands[0].content and _cands[0].content.parts:
-                _parts_info = f"parts={len(_cands[0].content.parts)}"
+                for _pi, _pp in enumerate(_cands[0].content.parts):
+                    _pt = getattr(_pp, "text", None) or ""
+                    _th = getattr(_pp, "thought", None)
+                    _diag_parts.append(f"p{_pi}:thought={_th}/len={len(_pt)}")
+                _parts_info = f"parts={len(_cands[0].content.parts)}," + ",".join(_diag_parts)
+            else:
+                _parts_info = f"cands={len(_cands)}"
             return {**GEMINI_FALLBACK, **meta,
                     "_debug_error": f"empty_response|{_parts_info}"}
     except Exception as e:
@@ -205,7 +250,7 @@ def detect_events(
 
     parsed = _parse_gemini_output(text)
     if not parsed:
-        snippet = (text or "")[:120].replace("\n", " ")
+        snippet = (text or "")[:500].replace("\n", "\\n")
         return {**GEMINI_FALLBACK, **meta,
                 "_debug_error": f"parse_error|len={len(text or '')}|{snippet}"}
 

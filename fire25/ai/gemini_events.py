@@ -100,7 +100,8 @@ def detect_events(
         return {**GEMINI_FALLBACK, **meta, "_debug_error": "no_articles"}
 
     try:
-        import google.generativeai as genai  # type: ignore
+        from google import genai  # type: ignore
+        from google.genai import types  # type: ignore
     except ImportError:
         return {**GEMINI_FALLBACK, **meta, "_debug_error": "missing_sdk"}
 
@@ -111,12 +112,14 @@ def detect_events(
 
     try:
         _model_name = model or get_model_name("gemini")
-        genai.configure(api_key=api_key)
-        gmodel = genai.GenerativeModel(_model_name)
-        response = gmodel.generate_content(
-            _build_prompt(payload),
-            generation_config={"temperature": 0.2, "max_output_tokens": 800},
-            request_options={"timeout": 15},
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=_model_name,
+            contents=_build_prompt(payload),
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=800,
+            ),
         )
         text = getattr(response, "text", "") or ""
     except Exception as e:

@@ -109,6 +109,24 @@ def _parse_gemini_output(text: str) -> dict | None:
     return None
 
 
+def _extract_gemini_text(response: Any) -> str:
+    """Robustly extract text from a google-genai response object."""
+    # 1) .text convenience property
+    text = getattr(response, "text", None)
+    if text:
+        return text
+    # 2) drill into candidates structure
+    try:
+        return response.candidates[0].content.parts[0].text
+    except Exception:
+        pass
+    # 3) last resort: stringify
+    try:
+        return str(response)
+    except Exception:
+        return ""
+
+
 def detect_events(
     articles: list[dict],
     aggregated_signals: dict,
@@ -153,12 +171,13 @@ def detect_events(
                 response_mime_type="application/json",
             ),
         )
-        text = getattr(response, "text", "") or ""
+        text = _extract_gemini_text(response)
     except Exception as e:
         return {**GEMINI_FALLBACK, **meta, "_debug_error": f"api_error:{type(e).__name__}:{e}"}
 
     # Debug logging (dev only)
-    print(f"GEMINI RAW RESPONSE ({len(text)} chars):", text[:500])
+    print("GEMINI RAW RESPONSE:")
+    print(text[:1000])
 
     parsed = _parse_gemini_output(text)
     if not parsed:

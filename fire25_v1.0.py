@@ -1196,7 +1196,7 @@ with tab1:
 with tab2:
     st.header("시장 현황")
     st.markdown("""<p style='color:#64748b; font-size:0.85em; letter-spacing:0.05em;
-        margin-top:-10px; margin-bottom:16px;'>📊 실시간 시세 · 센티먼트 · 기술적 지표 · 백테스트</p>""",
+        margin-top:-10px; margin-bottom:16px;'>📊 실시간 시세 · 센티먼트 · 기술적 지표 · 시장 레짐 · 뉴스 동인</p>""",
         unsafe_allow_html=True)
 
     # ── Real-time quotes ──
@@ -1550,13 +1550,109 @@ with tab2:
                             rows.append({"자산": sym, "CAGR": f"{m['CAGR']*100:.2f}%", "Sharpe": f"{m['Sharpe Ratio']:.2f}", "MDD": f"{m['Max Drawdown']*100:.2f}%", "전략수익": f"{m['strategy_return']*100:.2f}%"})
                     st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
+    st.markdown("---")
+
+    # ── 시장 레짐 / 핵심 지표 ──
+    st.subheader("📡 시장 레짐 / 핵심 지표")
+    _regime_label_map2 = {
+        "BULL": "🟢 상승장", "CORRECTION": "🟡 조정장",
+        "BEAR": "🔴 하락장", "RECOVERY": "🔵 회복장",
+    }
+    _regime_color_map2 = {
+        "BULL": "#10b981", "CORRECTION": "#f59e0b",
+        "BEAR": "#ef4444", "RECOVERY": "#3b82f6",
+    }
+    _regime_raw2 = regime_info.get("regime", "CORRECTION")
+    _r_label2 = _regime_label_map2.get(_regime_raw2, "🟡 조정장")
+    _r_color2 = _regime_color_map2.get(_regime_raw2, "#f59e0b")
+    _regime_conf2 = _safe_float(regime_info.get('confidence', 0.0), 0.0)
+    st.markdown(f"""
+    <div style="background:#1e293b;border:2px solid {_r_color2};border-radius:8px;
+                padding:10px 16px;display:inline-block;margin-bottom:12px;">
+        <span style="color:{_r_color2};font-weight:700;font-size:1.1em;">{_r_label2}</span>
+        <span style="color:#94a3b8;font-size:0.85em;margin-left:12px;">신뢰도 {_regime_conf2 * 100:.1f}%</span>
+    </div>""", unsafe_allow_html=True)
+    for item in regime_info.get("reason", []):
+        st.markdown(f"- {item}")
+
+    _vix_p2 = _safe_float((vix_data or {}).get("price"), 20.0)
+    _fng_v2 = _safe_int((fng_data or {}).get("value"), 50)
+    _tny_p2 = _safe_float((tnx_data or {}).get("price"), 0.0)
+    _oil_p2 = _safe_float((oil_data or {}).get("price"), 0.0)
+    k1b, k2b, k3b, k4b = st.columns(4)
+    k1b.metric("VIX", f"{_vix_p2:.2f}")
+    k2b.metric("Fear & Greed", f"{_fng_v2}")
+    k3b.metric("10Y 금리", f"{_tny_p2:.2f}%")
+    k4b.metric("유가", f"${_oil_p2:.2f}")
+
+    st.markdown("---")
+
+    # ── 오늘의 시장 동인 ──
+    @st.cache_data(ttl=1800)
+    def get_market_summary(symbol):
+        news_list = []
+        try:
+            feed_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
+            response = requests.get(feed_url, timeout=10)
+            if response.status_code != 200:
+                return news_list
+            root = ET.fromstring(response.content)
+            for item in root.findall('.//item')[:5]:
+                title = (item.findtext('title') or '').strip()
+                if not title:
+                    continue
+                news_list.append({
+                    'title': title,
+                    'publisher': (item.findtext('source') or 'Yahoo Finance').strip(),
+                    'link': (item.findtext('link') or '#').strip(),
+                })
+        except Exception:
+            pass
+        return news_list
+
+    def _interpret_asset(symbol, name, change_pct, news_list):
+        if change_pct > 1.0:
+            direction, detail = "강한 상승", "상승 모멘텀 확대"
+        elif change_pct > 0.3:
+            direction, detail = "상승", "완만한 상승"
+        elif change_pct > -0.3:
+            direction, detail = "보합", "제한적 움직임"
+        elif change_pct > -1.0:
+            direction, detail = "하락", "완만한 하락"
+        else:
+            direction, detail = "강한 하락", "하방 압력 확대"
+        return {'direction': direction, 'detail': detail, 'news': (news_list or [])[:2]}
+
+    st.subheader("📰 오늘의 시장 동인")
+    with st.spinner('시장 동인 분석 중...'):
+        qqqm_news = get_market_summary('QQQM')
+        schd_news = get_market_summary('SCHD')
+        iau_news = get_market_summary('IAU')
+        qqqm_an = _interpret_asset('QQQM', '나스닥 100', qqqm_data['change_pct'], qqqm_news)
+        schd_an = _interpret_asset('SCHD', '배당 성장', schd_data['change_pct'], schd_news)
+        iau_an = _interpret_asset('IAU', '금', iau_data['change_pct'], iau_news)
+
+    for label, color, an, data in [
+        ("QQQM (나스닥 100)", "#10b981", qqqm_an, qqqm_data),
+        ("SCHD (배당 성장)", "#3b82f6", schd_an, schd_data),
+        ("IAU (금)", "#fbbf24", iau_an, iau_data),
+    ]:
+        _ic = "📈" if data['change_pct'] >= 0 else "📉"
+        st.markdown(f"""
+        <div style="background:#1e293b;border-left:4px solid {color};border-radius:8px;padding:12px 16px;margin-bottom:8px;">
+            <p style="color:#e2e8f0;font-weight:600;margin:0 0 4px;">
+                {_ic} <b>{label}</b> — {data['change_pct']:+.2f}% | {an['direction']} ({an['detail']})
+            </p>
+            {''.join(f"<p style='color:#94a3b8;font-size:0.85em;margin:2px 0 0 16px;'>{n['title'][:80]}</p>" for n in an['news'])}
+        </div>""", unsafe_allow_html=True)
+
 # =====================================================================
 # TAB 3 — 거시경제 & 전략 (2-Layer: Facts + AI Orchestration)
 # =====================================================================
 with tab3:
     st.header("거시경제 & 전략")
     st.markdown("""<p style='color:#64748b; font-size:0.85em; letter-spacing:0.05em;
-        margin-top:-10px; margin-bottom:16px;'>🌐 시장 이벤트 · 리스크 레이더 · AI 전략 · 뉴스 분석</p>""",
+        margin-top:-10px; margin-bottom:16px;'>🌐 시장 이벤트 · 리스크 레이더 · AI 전략 · 포트폴리오 관점</p>""",
         unsafe_allow_html=True)
     nb = news_brief if isinstance(news_brief, dict) else {}
 
@@ -1564,8 +1660,8 @@ with tab3:
     # A. 정보 레이어 — 엔진이 계산한 사실/원자료만 표시
     # =================================================================
 
-    # ── 1. 시장 이벤트 ──
-    st.subheader("① 시장 이벤트")
+    # ── 시장 이벤트 ──
+    st.subheader("⚠️ 시장 이벤트")
     shock_events = detect_market_events(vix_data, fng_data, tnx_data, oil_data, nb)
     _label_map = {
         "POLICY_RATE_RISK": "금리 경로 리스크",
@@ -1598,8 +1694,8 @@ with tab3:
             <p style="color:#10b981;margin:0;">현재 주요 시장 이벤트가 감지되지 않았습니다.</p>
         </div>""", unsafe_allow_html=True)
 
-    # ── 2. 리스크 레이더 ──
-    st.subheader("② 리스크 레이더")
+    # ── 리스크 레이더 ──
+    st.subheader("🛡️ 리스크 레이더")
     radar = build_risk_radar(vix_data, fng_data, nb)
     _risk_cols = st.columns(4)
     _risk_names = ["금리 리스크", "인플레이션 리스크", "지정학 리스크", "시장 스트레스"]
@@ -1615,35 +1711,6 @@ with tab3:
                 <p style="color:{_rc};font-size:1.5em;font-weight:700;margin:0;">{_rv}</p>
             </div>""", unsafe_allow_html=True)
             st.progress(_rv / 100)
-
-    # ── 3. 시장 레짐 / 핵심 지표 ──
-    st.subheader("③ 시장 레짐 / 핵심 지표")
-    _regime_label_map = {
-        "BULL": "🟢 상승장", "CORRECTION": "🟡 조정장",
-        "BEAR": "🔴 하락장", "RECOVERY": "🔵 회복장",
-    }
-    _regime_color_map = {
-        "BULL": "#10b981", "CORRECTION": "#f59e0b",
-        "BEAR": "#ef4444", "RECOVERY": "#3b82f6",
-    }
-    _regime_raw = regime_info.get("regime", "CORRECTION")
-    _r_label = _regime_label_map.get(_regime_raw, "🟡 조정장")
-    _r_color = _regime_color_map.get(_regime_raw, "#f59e0b")
-    st.markdown(f"""
-    <div style="background:#1e293b;border:2px solid {_r_color};border-radius:8px;
-                padding:10px 16px;display:inline-block;margin-bottom:12px;">
-        <span style="color:{_r_color};font-weight:700;font-size:1.1em;">{_r_label}</span>
-    </div>""", unsafe_allow_html=True)
-
-    _vix_p = _safe_float((vix_data or {}).get("price"), 20.0)
-    _fng_v = _safe_int((fng_data or {}).get("value"), 50)
-    _tny_p = _safe_float((tnx_data or {}).get("price"), 0.0)
-    _oil_p = _safe_float((oil_data or {}).get("price"), 0.0)
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("VIX", f"{_vix_p:.2f}")
-    k2.metric("Fear & Greed", f"{_fng_v}")
-    k3.metric("10Y 금리", f"{_tny_p:.2f}%")
-    k4.metric("유가", f"${_oil_p:.2f}")
 
     st.markdown("---")
 
@@ -1897,69 +1964,8 @@ with tab3:
 
     st.markdown("---")
 
-    # ── 4. 오늘의 시장 동인 ──
-    @st.cache_data(ttl=1800)
-    def get_market_summary(symbol):
-        news_list = []
-        try:
-            feed_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
-            response = requests.get(feed_url, timeout=10)
-            if response.status_code != 200:
-                return news_list
-            root = ET.fromstring(response.content)
-            for item in root.findall('.//item')[:5]:
-                title = (item.findtext('title') or '').strip()
-                if not title:
-                    continue
-                news_list.append({
-                    'title': title,
-                    'publisher': (item.findtext('source') or 'Yahoo Finance').strip(),
-                    'link': (item.findtext('link') or '#').strip(),
-                })
-        except Exception:
-            pass
-        return news_list
-
-    def _interpret_asset(symbol, name, change_pct, news_list):
-        if change_pct > 1.0:
-            direction, detail = "강한 상승", "상승 모멘텀 확대"
-        elif change_pct > 0.3:
-            direction, detail = "상승", "완만한 상승"
-        elif change_pct > -0.3:
-            direction, detail = "보합", "제한적 움직임"
-        elif change_pct > -1.0:
-            direction, detail = "하락", "완만한 하락"
-        else:
-            direction, detail = "강한 하락", "하방 압력 확대"
-        return {'direction': direction, 'detail': detail, 'news': (news_list or [])[:2]}
-
-    st.subheader("④ 오늘의 시장 동인")
-    with st.spinner('시장 동인 분석 중...'):
-        qqqm_news = get_market_summary('QQQM')
-        schd_news = get_market_summary('SCHD')
-        iau_news = get_market_summary('IAU')
-        qqqm_an = _interpret_asset('QQQM', '나스닥 100', qqqm_data['change_pct'], qqqm_news)
-        schd_an = _interpret_asset('SCHD', '배당 성장', schd_data['change_pct'], schd_news)
-        iau_an = _interpret_asset('IAU', '금', iau_data['change_pct'], iau_news)
-
-    for label, color, an, data in [
-        ("QQQM (나스닥 100)", "#10b981", qqqm_an, qqqm_data),
-        ("SCHD (배당 성장)", "#3b82f6", schd_an, schd_data),
-        ("IAU (금)", "#fbbf24", iau_an, iau_data),
-    ]:
-        _ic = "📈" if data['change_pct'] >= 0 else "📉"
-        st.markdown(f"""
-        <div style="background:#1e293b;border-left:4px solid {color};border-radius:8px;padding:12px 16px;margin-bottom:8px;">
-            <p style="color:#e2e8f0;font-weight:600;margin:0 0 4px;">
-                {_ic} <b>{label}</b> — {data['change_pct']:+.2f}% | {an['direction']} ({an['detail']})
-            </p>
-            {''.join(f"<p style='color:#94a3b8;font-size:0.85em;margin:2px 0 0 16px;'>{n['title'][:80]}</p>" for n in an['news'])}
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    # ── 5. 포트폴리오 관점 (엔진 원자료) ──
-    st.subheader("⑤ 포트폴리오 관점")
+    # ── 포트폴리오 관점 (엔진 원자료) ──
+    st.subheader("💼 포트폴리오 관점")
     _aimp = nb.get("asset_implications", {}) if isinstance(nb.get("asset_implications"), dict) else {}
     _impact_rows = [
         {"자산": "QQQM", "관점": short_korean(_aimp.get("QQQM", "확인 필요"), 1)},
@@ -1969,16 +1975,16 @@ with tab3:
     ]
     st.dataframe(pd.DataFrame(_impact_rows), width='stretch', hide_index=True)
 
-    # ── 6. 체크 포인트 ──
-    st.subheader("⑥ 체크 포인트")
+    # ── 체크 포인트 ──
+    st.subheader("✅ 체크 포인트")
     _wp = nb.get("watch_points", [])
     if not isinstance(_wp, list):
         _wp = []
     for wp in (_wp or ["미국 10년물 금리", "VIX 방향", "유가 흐름"])[:4]:
         st.markdown(f"- {wp}")
 
-    # ── 7. 대표 뉴스 보기 ──
-    with st.expander("⑦ 대표 뉴스 보기", expanded=False):
+    # ── 대표 뉴스 보기 ──
+    with st.expander("📰 대표 뉴스 보기", expanded=False):
         if market_news:
             for _ni in market_news[:5]:
                 _nt = (_ni.get("title") or "").strip()

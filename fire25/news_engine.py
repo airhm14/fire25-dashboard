@@ -17,7 +17,8 @@ except Exception:  # pragma: no cover
 
 
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
-GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
+# Legacy Gemini model constant removed — all Gemini calls now go through
+# fire25/ai/gemini_events.py using the google-genai SDK + model_registry.
 
 LOGGER = logging.getLogger(__name__)
 
@@ -343,35 +344,13 @@ def _validate_ai_output(payload: dict) -> dict | None:
 
 
 def generate_ai_macro_brief(payload: dict, timeout_sec: int = 12) -> dict | None:
-    """Call Gemini and return validated structured JSON if successful."""
-    api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
-    if not api_key:
-        return None
+    """Legacy Gemini path — disabled.
 
-    try:
-        import google.generativeai as genai  # type: ignore
-    except Exception:
-        LOGGER.info("Gemini SDK unavailable; using rule-based news summary.")
-        return None
-
-    try:
-        genai.configure(api_key=api_key)
-        model_name = (os.getenv("GEMINI_MODEL_NAME") or GEMINI_MODEL_NAME).strip() or GEMINI_MODEL_NAME
-        model = genai.GenerativeModel(model_name)
-        response = model.generate_content(
-            _gemini_prompt(payload),
-            generation_config={"temperature": 0.2, "max_output_tokens": 1000},
-            request_options={"timeout": timeout_sec},
-        )
-
-        text = getattr(response, "text", "") or ""
-        parsed = _safe_parse_json(text)
-        if not parsed:
-            return None
-        return _validate_ai_output(parsed)
-    except Exception:
-        LOGGER.exception("Gemini generation failed; keeping rule-based output.")
-        return None
+    All Gemini AI generation now goes through ``fire25.ai.gemini_events``
+    using the new ``google-genai`` SDK.  This function returns ``None``
+    so callers fall back to the rule-based summary.
+    """
+    return None
 
 
 def try_generate_gemini_brief(payload: dict) -> dict | None:

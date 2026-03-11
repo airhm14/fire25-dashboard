@@ -1950,6 +1950,211 @@ with tab3:
 
     st.markdown("---")
 
+    # =================================================================
+    # C. AI 전략 오케스트레이터 — Manual 30 / AI 70
+    #    Regime Gate → Gemini(뉴스) → Claude+GPT(독립 전략) → 합의/토론 → 실행 계획
+    # =================================================================
+    st.markdown("""<p style='color:#f59e0b; font-size:0.85em; letter-spacing:0.05em;
+        margin-bottom:4px;'>⚡ <b>AI 전략 오케스트레이터</b> — Regime Gate · Claude vs GPT · Manual Guard</p>""",
+        unsafe_allow_html=True)
+
+    if st.button("🚀 AI 전략 실행", key="ai_v2_orch"):
+        _gemini_key = st.secrets.get("GEMINI_API_KEY", "")
+        _claude_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+        _openai_key = st.secrets.get("OPENAI_API_KEY", "")
+        _models_cfg = dict(st.secrets.get("models", {}))
+
+        from fire25.engine.orchestrator import run as orchestrator_run
+        from fire25.strategy_v2.portfolio_strategy import build_portfolio_input
+        from fire25.ai.decision_context_builder import build_decision_context
+
+        _qqqm_sma200_v2 = _safe_float(qqqm_data.get("sma_200"), 0.0)
+        _qqqm_price_v2 = _safe_float(qqqm_data.get("price"), 0.0)
+        _sma200_gap_v2 = (
+            (_qqqm_price_v2 - _qqqm_sma200_v2) / _qqqm_sma200_v2 * 100.0
+            if _qqqm_sma200_v2 > 0 else 0.0
+        )
+        _cash_level_v2 = "높음" if cash_pct >= 15 else ("중간" if cash_pct >= 8 else "낮음")
+
+        _portfolio_input = build_portfolio_input(
+            qqqm_shares=qqqm_qty,
+            schd_shares=schd_qty,
+            iau_shares=iau_qty,
+            sgov_shares=sgov_qty,
+            cash_deposit=cash_deposit,
+            qqqm_price=_safe_float(qqqm_data.get("price"), 0.0),
+            schd_price=_safe_float(schd_data.get("price"), 0.0) if schd_data else 0.0,
+            iau_price=_safe_float(iau_data.get("price"), 0.0) if iau_data else 0.0,
+            sgov_price=_safe_float(sgov_data.get("price"), 0.0) if sgov_data else 0.0,
+        )
+
+        _macro_ctx_v2 = {
+            "VIX": _safe_float((vix_data or {}).get("price"), 20.0),
+            "fear_greed": _safe_int((fng_data or {}).get("value"), 50),
+            "QQQM_RSI": _safe_float(qqqm_data.get("rsi"), 50.0),
+            "QQQM_SMA200_gap": round(_sma200_gap_v2, 2),
+            "10Y_treasury": _safe_float((tnx_data or {}).get("price"), 0.0),
+            "oil_price": _safe_float((oil_data or {}).get("price"), 0.0),
+            "regime": str(regime_info.get("regime", "CORRECTION")),
+            "cash_level": _cash_level_v2,
+            "macro_summary": short_korean(str(macro_summary.get("implication", "")), 2),
+        }
+
+        nb = news_brief if isinstance(news_brief, dict) else {}
+        _news_text = short_korean(str(nb.get("headline_summary", "")), 2)
+
+        with st.spinner("AI 전략 오케스트레이션 중... (기본 3콜, 충돌 시 5콜)"):
+            orch_result = orchestrator_run(
+                defcon_triggered=defcon_triggered,
+                puddle_stage=puddle_result.stage,
+                puddle_alert=puddle_result.alert,
+                smart_shoulder_triggered=smart_shoulder_triggered,
+                market_regime=str(regime_info.get("regime", "CORRECTION")),
+                market_confidence=float(regime_info.get("confidence", 0.5)),
+                articles=market_news,
+                aggregated_signals=nb.get("aggregated_signals", {}),
+                theme_info=nb.get("theme_info", {}),
+                portfolio=_portfolio_input,
+                macro_context=_macro_ctx_v2,
+                news_summary=_news_text,
+                gemini_api_key=_gemini_key,
+                claude_api_key=_claude_key,
+                openai_api_key=_openai_key,
+                models_config=_models_cfg,
+            )
+
+        # ── Regime Gate 결과 ──
+        _rg = orch_result.get("regime", {})
+        _regime_name = _rg.get("regime", "NORMAL")
+        _regime_colors = {
+            "NORMAL": "#10b981", "DEFCON": "#f59e0b",
+            "PUDDLE_1": "#3b82f6", "PUDDLE_2": "#6366f1",
+            "PUDDLE_3": "#8b5cf6", "PUDDLE_4": "#ef4444",
+            "SMART_SHOULDER": "#f97316",
+        }
+        _rc = _regime_colors.get(_regime_name, "#94a3b8")
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
+                    border:2px solid {_rc};border-radius:12px;padding:16px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <span style="background:{_rc};color:white;padding:4px 12px;border-radius:6px;
+                             font-weight:700;font-size:1.1em;">{_regime_name}</span>
+                <span style="color:#94a3b8;font-size:0.9em;">
+                    신뢰도 {int(_rg.get('confidence', 0) * 100)}% | API {orch_result.get('api_calls', 0)}콜
+                </span>
+            </div>
+            <p style="color:#cbd5e1;margin:8px 0 0;font-size:0.85em;">
+                {' / '.join(_rg.get('reasons', []))}
+            </p>
+        </div>""", unsafe_allow_html=True)
+
+        # ── Claude vs GPT 비교 ──
+        _cr = orch_result.get("claude_raw", {})
+        _gr = orch_result.get("gpt_raw", {})
+        _conflict = orch_result.get("conflict", {})
+        _agreed = _conflict.get("agreed", True)
+
+        col_c, col_g = st.columns(2)
+        with col_c:
+            _c_err = _cr.get("_debug_error")
+            _c_border = "#a855f7" if not _c_err else "#ef4444"
+            st.markdown(f"""
+            <div style="background:#1e293b;border:1px solid {_c_border};border-radius:10px;padding:14px;">
+                <p style="color:#c084fc;font-weight:700;margin:0 0 8px;">🔮 Claude (전략가 A)</p>
+                <p style="color:#e2e8f0;font-size:0.9em;margin:4px 0;">{_cr.get('market_view','—')}</p>
+                <p style="color:#94a3b8;font-size:0.8em;margin:4px 0;">💡 {_cr.get('strategy_reason','—')}</p>
+                <p style="color:#cbd5e1;font-size:0.85em;margin:4px 0;">현금: <b>{_cr.get('cash_action','—')}</b> | 신뢰도: <b>{_cr.get('confidence_score', 0)}</b></p>
+            </div>""", unsafe_allow_html=True)
+            if _cr.get("recommended_actions"):
+                _c_acts = _cr["recommended_actions"]
+                for _a in _c_acts:
+                    _act_color = {"BUY": "#34d399", "REDUCE": "#f87171"}.get(_a.get("action",""), "#94a3b8")
+                    if _a.get("action") != "HOLD":
+                        st.markdown(f"<span style='color:{_act_color};font-size:0.85em;'>{_a.get('ticker')} {_a.get('action')} {_a.get('amount',0)}주</span>", unsafe_allow_html=True)
+
+        with col_g:
+            _g_err = _gr.get("_debug_error")
+            _g_border = "#10b981" if not _g_err else "#ef4444"
+            st.markdown(f"""
+            <div style="background:#1e293b;border:1px solid {_g_border};border-radius:10px;padding:14px;">
+                <p style="color:#34d399;font-weight:700;margin:0 0 8px;">🧠 GPT (전략가 B)</p>
+                <p style="color:#e2e8f0;font-size:0.9em;margin:4px 0;">{_gr.get('market_view','—')}</p>
+                <p style="color:#94a3b8;font-size:0.8em;margin:4px 0;">💡 {_gr.get('strategy_reason','—')}</p>
+                <p style="color:#cbd5e1;font-size:0.85em;margin:4px 0;">현금: <b>{_gr.get('cash_action','—')}</b> | 신뢰도: <b>{_gr.get('confidence_score',0)}</b></p>
+            </div>""", unsafe_allow_html=True)
+            if _gr.get("recommended_actions"):
+                _g_acts = _gr["recommended_actions"]
+                for _a in _g_acts:
+                    _act_color = {"BUY": "#34d399", "REDUCE": "#f87171"}.get(_a.get("action",""), "#94a3b8")
+                    if _a.get("action") != "HOLD":
+                        st.markdown(f"<span style='color:{_act_color};font-size:0.85em;'>{_a.get('ticker')} {_a.get('action')} {_a.get('amount',0)}주</span>", unsafe_allow_html=True)
+
+        # ── 합의/충돌 ──
+        if _agreed:
+            st.success("✅ Claude와 GPT가 합의했습니다.")
+        else:
+            st.warning("⚠️ 전략가 간 충돌 발생 → 토론 1라운드 실행됨")
+            for _cr_reason in _conflict.get("conflict_reasons", []):
+                st.markdown(f"- {_cr_reason}")
+
+        # ── 토론 결과 ──
+        _disc = orch_result.get("discussion")
+        if _disc:
+            with st.expander("🗣 토론 내용", expanded=False):
+                st.markdown(f"**Claude 검토:** {_disc.get('claude_review', '—')}")
+                st.markdown(f"**GPT 반영:** {_disc.get('discussion_note', '—')}")
+                st.markdown(f"토론 라운드: {_disc.get('rounds', 0)}")
+
+        # ── 최종 전략 ──
+        _final = orch_result.get("final_strategy", {})
+        _exec = _final.get("execution_plan", {})
+
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#0f172a,#1e1b4b);
+                    border:2px solid #f59e0b;border-radius:12px;padding:20px;margin:16px 0;">
+            <p style="color:#f59e0b;font-weight:700;font-size:1.1em;margin:0 0 8px;">
+                📋 최종 전략 ({_final.get('_source','—')})
+            </p>
+            <p style="color:#e2e8f0;margin:4px 0;line-height:1.5;">{_final.get('market_view','—')}</p>
+            <p style="color:#94a3b8;font-size:0.9em;margin:4px 0;">{_final.get('strategy_reason','—')}</p>
+        </div>""", unsafe_allow_html=True)
+
+        # ── 실행 계획 ──
+        if _exec.get("orders"):
+            st.markdown("**📦 실행 계획**")
+            for _ord in _exec["orders"]:
+                if _ord.get("action") == "HOLD":
+                    continue
+                _act_emoji = {"BUY": "🟢", "REDUCE": "🔴"}.get(_ord.get("action",""), "⚪")
+                _cost_str = ""
+                if "estimated_cost" in _ord and _ord["estimated_cost"] > 0:
+                    _cost_str = f" (≈${_ord['estimated_cost']:,.0f})"
+                elif "estimated_proceeds" in _ord and _ord["estimated_proceeds"] > 0:
+                    _cost_str = f" (≈${_ord['estimated_proceeds']:,.0f})"
+                st.markdown(f"{_act_emoji} **{_ord['ticker']}** {_ord['action']} {_ord.get('shares',0)}주{_cost_str}")
+
+        st.markdown(f"""
+        <div style="background:#1e293b;border-radius:8px;padding:12px;margin-top:8px;">
+            <p style="color:#94a3b8;font-size:0.85em;margin:0;">
+                {_exec.get('summary', '변동 없음')} | 현금 잔여: ${_exec.get('remaining_cash', 0):,.0f}
+                | 현금 전략: {_final.get('cash_action', 'KEEP')} | 신뢰도: {_final.get('confidence_score', 0)}
+            </p>
+        </div>""", unsafe_allow_html=True)
+
+        # ── Manual Guard 위반 ──
+        _gv = orch_result.get("guard_violations", {})
+        _final_v = _gv.get("final", [])
+        if _final_v:
+            st.error(f"🛡 매뉴얼 가드 발동: {', '.join(_final_v)}")
+        if _final.get("_guard_corrected"):
+            st.warning("전략이 매뉴얼 규칙에 의해 보정되었습니다 (전 종목 HOLD).")
+
+        # ── 상세 진단 ──
+        with st.expander("🔍 AI 전략 상세 진단", expanded=False):
+            st.json(orch_result)
+
+    st.markdown("---")
+
     # ── 7. 포트폴리오 관점 (엔진 원자료) ──
     st.subheader("⑦ 포트폴리오 관점")
     _aimp = nb.get("asset_implications", {}) if isinstance(nb.get("asset_implications"), dict) else {}

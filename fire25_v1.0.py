@@ -1844,7 +1844,7 @@ with tab3:
         </div>""", unsafe_allow_html=True)
 
         # ── Gemini 이벤트 브리프 ──
-        _gemini_data = orch_result.get("gemini", {})
+        _gemini_data = orch_result.get("gemini") or {}
         _gem_src = _gemini_data.get("_source", "fallback")
         _gem_headline = _gemini_data.get("headline_summary", "뉴스 요약 없음")
         _gem_model = _gemini_data.get("_model", "")
@@ -1860,9 +1860,9 @@ with tab3:
         </div>""", unsafe_allow_html=True)
 
         # ── Claude vs GPT 비교 ──
-        _cr = orch_result.get("claude_raw", {})
-        _gr = orch_result.get("gpt_raw", {})
-        _conflict = orch_result.get("conflict", {})
+        _cr = orch_result.get("claude_raw") or {}
+        _gr = orch_result.get("gpt_raw") or {}
+        _conflict = orch_result.get("conflict") or {}
         _agreed = _conflict.get("agreed", True)
 
         col_c, col_g = st.columns(2)

@@ -35,7 +35,11 @@ def _cached_gemini(
     articles = json.loads(articles_json)
     signals = json.loads(signals_json)
     themes = json.loads(themes_json)
-    return detect_events(articles, signals, themes, asset_focus, api_key=gemini_api_key, model=gemini_model)
+    result = detect_events(articles, signals, themes, asset_focus, api_key=gemini_api_key, model=gemini_model)
+    # Don't cache failures — raise so st.cache_data skips storing
+    if result.get("_debug_error"):
+        _cached_gemini.clear()
+    return result
 
 
 @st.cache_data(ttl=900, show_spinner=False)

@@ -62,7 +62,8 @@ Buy Fear · Rebalance Strength · Protect Core Asset · Compound Long Term
 [입력 데이터]
 포트폴리오: {portfolio_json}
 거시지표: {macro_json}
-뉴스 요약: {news_summary}
+
+{news_snapshot_text}
 
 [출력 규칙]
 - 반드시 JSON 객체 하나만 반환하세요.
@@ -137,6 +138,7 @@ def run(
     portfolio: dict,
     macro_context: dict,
     news_summary: str = "",
+    news_snapshot: dict | None = None,
     api_key: str = "",
     model: str = "",
     timeout: float = 30.0,
@@ -154,11 +156,18 @@ def run(
 
     _model = model or get_model_name("openai")
 
+    # news_snapshot 이 있으면 구조화 텍스트 사용, 없으면 기존 news_summary fallback
+    if news_snapshot and news_snapshot.get("_source") != "fallback":
+        from fire25.agents.news_snapshot import snapshot_to_prompt
+        _news_text = snapshot_to_prompt(news_snapshot)
+    else:
+        _news_text = f"뉴스 요약: {news_summary}" if news_summary else "[뉴스 데이터 없음]"
+
     prompt = STRATEGY_PROMPT.format(
         regime=regime,
         portfolio_json=json.dumps(portfolio, ensure_ascii=False),
         macro_json=json.dumps(macro_context, ensure_ascii=False),
-        news_summary=news_summary,
+        news_snapshot_text=_news_text,
     )
 
     try:

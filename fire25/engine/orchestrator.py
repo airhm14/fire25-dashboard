@@ -139,6 +139,7 @@ def run(
         "reused_strategy": False,
         "regime_lock_exception": None,
         "decision_context": None,
+        "news_snapshot": None,
     }
 
     # ── Step 1: Regime Gate (with persistence filter) ────────────
@@ -255,7 +256,7 @@ def run(
         if check_puddle_cooldown(stage):
             result["puddle_cooldown_blocked"] = True
 
-    # ── Step 6: Gemini News ──────────────────────────────────────
+    # ── Step 6: Gemini News → 구조화 이벤트 추출 + Snapshot ─────
     gemini_result = gemini_agent.run(
         articles=_articles,
         aggregated_signals=aggregated_signals or {},
@@ -266,7 +267,16 @@ def run(
     api_calls += 1
     result["gemini"] = gemini_result
 
-    # Enrich news summary
+    # News Snapshot 추출 (Gemini 결과에서)
+    _news_snapshot = gemini_result.get("news_snapshot") or {}
+    result["news_snapshot"] = _news_snapshot
+
+    # decision_context에 snapshot 반영 (해시 안정성 강화)
+    decision_ctx["news_snapshot"] = _news_snapshot
+    strategy_hash = compute_strategy_hash(decision_ctx)
+    result["strategy_hash"] = strategy_hash
+
+    # Enrich news summary (fallback용)
     _news_for_strategy = news_summary
     if gemini_result.get("_source") == "gemini":
         _news_for_strategy = gemini_result.get("headline_summary", "") or news_summary
@@ -277,6 +287,7 @@ def run(
         portfolio=_portfolio,
         macro_context=_macro,
         news_summary=_news_for_strategy,
+        news_snapshot=_news_snapshot,
         api_key=claude_api_key,
         model=_claude_model,
     )
@@ -288,6 +299,7 @@ def run(
         portfolio=_portfolio,
         macro_context=_macro,
         news_summary=_news_for_strategy,
+        news_snapshot=_news_snapshot,
         api_key=openai_api_key,
         model=_gpt_model,
     )

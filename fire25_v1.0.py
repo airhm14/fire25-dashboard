@@ -1843,11 +1843,19 @@ with tab3:
             <span>♻️ 전략: {_reuse_label}</span>
         </div>""", unsafe_allow_html=True)
 
-        # ── Gemini 이벤트 브리프 ──
+        # ── Gemini 이벤트 브리프 + News Snapshot ──
         _gemini_data = orch_result.get("gemini") or {}
         _gem_src = _gemini_data.get("_source", "fallback")
         _gem_headline = _gemini_data.get("headline_summary", "뉴스 요약 없음")
         _gem_model = _gemini_data.get("_model", "")
+        _n_snap = orch_result.get("news_snapshot") or _gemini_data.get("news_snapshot") or {}
+        _snap_hash = str(_n_snap.get("snapshot_hash", ""))[:12] or "—"
+        _raw_cnt = _n_snap.get("raw_news_count", 0)
+        _dedup_cnt = _n_snap.get("deduped_event_count", 0)
+        _macro_bias = _n_snap.get("macro_bias", "neutral")
+        _bias_colors = {"risk_on": "#10b981", "risk_off": "#ef4444", "neutral": "#94a3b8"}
+        _bias_color = _bias_colors.get(_macro_bias, "#94a3b8")
+        _asset_bias = _n_snap.get("asset_bias", {})
         st.markdown(f"""
         <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
                     border:1px solid #3b82f6;border-radius:12px;padding:20px;margin-bottom:16px;">
@@ -1856,7 +1864,17 @@ with tab3:
                 <span style="color:#60a5fa;font-weight:700;font-size:1.1em;">Gemini 이벤트 브리프</span>
                 <span style="color:#475569;font-size:0.8em;margin-left:auto;">{_gem_src} · {_gem_model}</span>
             </div>
-            <p style="color:#e2e8f0;margin:0;line-height:1.6;">{_gem_headline}</p>
+            <p style="color:#e2e8f0;margin:0 0 12px 0;line-height:1.6;">{_gem_headline}</p>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:0.8em;color:#94a3b8;
+                        border-top:1px solid #334155;padding-top:10px;">
+                <span>📰 원본: {_raw_cnt}건</span>
+                <span>🔍 이벤트: {_dedup_cnt}개</span>
+                <span>🧭 매크로: <b style="color:{_bias_color};">{_macro_bias}</b></span>
+                <span>🔑 snap: <code style="color:#60a5fa;">{_snap_hash}</code></span>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:0.78em;color:#94a3b8;margin-top:6px;">
+                {"".join(f'<span>{a}: <b style="color:{"#10b981" if v > 0 else "#ef4444" if v < 0 else "#94a3b8"};">{v:+d}</b></span>' for a, v in _asset_bias.items())}
+            </div>
         </div>""", unsafe_allow_html=True)
 
         # ── Claude vs GPT 비교 ──
@@ -1995,6 +2013,16 @@ with tab3:
             st.markdown(f"- **reused_strategy**: {orch_result.get('reused_strategy', False)}")
             if orch_result.get("regime_lock_exception"):
                 st.markdown(f"- **regime_lock_exception**: {orch_result['regime_lock_exception']}")
+            _diag_snap = orch_result.get("news_snapshot") or {}
+            if _diag_snap:
+                st.markdown("---")
+                st.markdown("**📰 뉴스 스냅샷 메타데이터**")
+                st.markdown(f"- **snapshot_hash**: `{_diag_snap.get('snapshot_hash', '—')}`")
+                st.markdown(f"- **raw_news_count**: {_diag_snap.get('raw_news_count', 0)}")
+                st.markdown(f"- **deduped_event_count**: {_diag_snap.get('deduped_event_count', 0)}")
+                st.markdown(f"- **macro_bias**: {_diag_snap.get('macro_bias', 'neutral')}")
+                st.markdown(f"- **event_scores**: {_diag_snap.get('event_scores', {})}")
+                st.markdown(f"- **asset_bias**: {_diag_snap.get('asset_bias', {})}")
             _dctx = orch_result.get("decision_context")
             if _dctx:
                 with st.expander("📸 Decision Context Snapshot", expanded=False):

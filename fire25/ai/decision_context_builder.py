@@ -166,6 +166,8 @@ def build_decision_context(
     news_items: list[dict] | None = None,
     shock_events: list[str] | None = None,
     risk_radar: dict | None = None,
+    # News snapshot (구조화 이벤트 기반)
+    news_snapshot: dict | None = None,
 ) -> dict:
     """정규화된 decision context 스냅샷 반환.
 
@@ -218,6 +220,9 @@ def build_decision_context(
     # ── News (정규화) ─────────────────────────────────────────
     norm_news = normalize_news(news_items)
 
+    # ── News Snapshot (구조화 이벤트 기반) ────────────────────
+    _snapshot = news_snapshot if isinstance(news_snapshot, dict) else {}
+
     return {
         "timestamp_bucket": get_timestamp_bucket(),
         "regime": str(regime),
@@ -228,6 +233,7 @@ def build_decision_context(
         "manual_state": manual_state,
         "macro_summary": str(macro_summary_text or ""),
         "news_summary": str(news_summary_text or ""),
+        "news_snapshot": _snapshot,
     }
 
 
@@ -239,12 +245,19 @@ def compute_strategy_hash(context: dict) -> str:
     동일한 입력 조합이면 반드시 동일 해시를 반환한다.
     뉴스 순서가 달라도 정규화 후 동일하면 같은 해시.
     """
+    # news_snapshot이 있으면 snapshot_hash 사용 (뉴스 안정성 강화)
+    _snap = context.get("news_snapshot") or {}
+    if _snap.get("snapshot_hash"):
+        news_key = _snap["snapshot_hash"]
+    else:
+        news_key = [n.get("title", "") for n in context.get("news_items", [])]
+
     hash_input = {
         "regime": context.get("regime", ""),
         "portfolio": context.get("portfolio", {}),
         "indicators": context.get("indicators", {}),
         "signals": context.get("signals", {}),
-        "news_ids": [n.get("title", "") for n in context.get("news_items", [])],
+        "news_key": news_key,
         "manual_state": context.get("manual_state", {}),
     }
     canonical = json.dumps(hash_input, sort_keys=True, ensure_ascii=False, default=str)

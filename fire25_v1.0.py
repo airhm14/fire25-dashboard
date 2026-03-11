@@ -1195,6 +1195,9 @@ with tab1:
 # =====================================================================
 with tab2:
     st.header("시장 현황")
+    st.markdown("""<p style='color:#64748b; font-size:0.85em; letter-spacing:0.05em;
+        margin-top:-10px; margin-bottom:16px;'>📊 실시간 시세 · 센티먼트 · 기술적 지표 · 백테스트</p>""",
+        unsafe_allow_html=True)
 
     # ── Real-time quotes ──
     q1, q2, q3, q4 = st.columns(4)
@@ -1292,68 +1295,8 @@ with tab2:
 
     st.markdown("---")
 
-    # ── Market regime ──
-    regime_label_map = {"BULL": "🟢 상승장", "CORRECTION": "🟡 조정장", "BEAR": "🔴 하락장", "RECOVERY": "🔵 회복장"}
-    regime_color_map = {"BULL": "#10b981", "CORRECTION": "#f59e0b", "BEAR": "#ef4444", "RECOVERY": "#3b82f6"}
-    regime_raw = regime_info.get("regime", "CORRECTION")
-    regime_conf = _safe_float(regime_info.get('confidence', 0.0), 0.0)
-    r_label = regime_label_map.get(regime_raw, "🟡 조정장")
-    r_color = regime_color_map.get(regime_raw, "#f59e0b")
-    st.markdown(f"<span style='background:{r_color}; color:white; padding:6px 14px; border-radius:6px; font-weight:700;'>{r_label}</span>", unsafe_allow_html=True)
-    st.caption(f"신뢰도: {regime_conf * 100:.1f}%")
-    for item in regime_info.get("reason", []):
-        st.markdown(f"- {item}")
-
-    st.markdown("---")
-
-    # ── Strategy condition cards (DEFCON / Puddle / Smart Shoulder) ──
-    st.subheader("전략 조건 분석")
-
-    if defcon_triggered:
-        st.markdown(f"""
-        <div class="warning-box">
-            <div class="warning-title">⚠️ DEFCON 세이빙 발동</div>
-            <p><strong>VIX:</strong> {vix_data['price']:.2f} (&le; 14.00)&nbsp;&nbsp;
-            <strong>RSI:</strong> {qqqm_data['rsi']:.2f} (&ge; 70)</p>
-            <p><strong>조치:</strong> 신규 자금 100%를 SGOV로 배분 (QQQM/SCHD/IAU 매수 차단)</p>
-        </div>""", unsafe_allow_html=True)
-
-    if puddle_alert:
-        _stage_info = {
-            1: {"name": "1단계: SMA50 하향 이탈", "color": "#fbbf24", "rate": 15},
-            2: {"name": "2단계: SMA100 하향 이탈", "color": "#f97316", "rate": 35},
-            3: {"name": "3단계: SMA200 하향 이탈", "color": "#ef4444", "rate": 50},
-            4: {"name": "4단계: SMA200 회복", "color": "#10b981", "rate": 100},
-        }
-        _si = _stage_info.get(puddle_stage, _stage_info[1])
-        _remaining_cash = sgov_value + cash_deposit
-        _injection = compute_deployment(puddle_stage, _remaining_cash)
-        st.markdown(f"""
-        <div class="warning-box" style="border-color:{_si['color']};">
-            <div class="warning-title" style="color:{_si['color']};">웅덩이 진입: {_si['name']}</div>
-            <p><strong>현재가:</strong> ${qqqm_data['price']:.2f}</p>
-            <p><strong>투입 비율:</strong> {_si['rate']}% &nbsp;|&nbsp; <strong>투입 금액:</strong> ${_injection:,.2f}</p>
-            <p style="color:#10b981; font-weight:700;">신규 자금은 목표 비중 72/16/2/10으로 즉시 배분합니다.</p>
-        </div>""", unsafe_allow_html=True)
-
-    if puddle_cooldown_active and not puddle_alert:
-        st.markdown(f"""
-        <div class="info-box">
-            <div class="warning-title">웅덩이 쿨다운 진행 중</div>
-            <p><strong>현재가:</strong> ${qqqm_data['price']:.2f} (대기)</p>
-            <p><strong>판단 근거:</strong> {cooldown_info if cooldown_info else "최근 30일 이내 신호 발생"}</p>
-            <p style="color:#fbbf24;"><strong>조치:</strong> 다음 유효 신호를 대기합니다.</p>
-        </div>""", unsafe_allow_html=True)
-
-    if rebalancing_needed and not smart_shoulder_triggered:
-        _excess = qqqm_pct - 72
-        st.info(f"QQQM 과비중 감지: {qqqm_pct:.2f}% (초과 +{_excess:.2f}%p) — Smart Shoulder 트리거 대기")
-
-    if smart_shoulder_triggered:
-        _excess = qqqm_pct - 72
-        st.error(f"Smart Shoulder 리밸런싱 발동: QQQM {qqqm_pct:.2f}% (초과 +{_excess:.2f}%p) → 72/16/2/10 복귀")
-
     # ── RSI / SMA indicator cards ──
+    st.subheader("QQQM 기술적 지표")
     ic1, ic2, ic3 = st.columns(3)
     with ic1:
         _rsi = qqqm_data.get('rsi', 50.0)
@@ -1392,7 +1335,7 @@ with tab2:
         </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    ic4, ic5, ic6 = st.columns(3)
+    ic4, ic5 = st.columns(2)
     with ic4:
         _sma100 = qqqm_data.get('sma_100', 0.0)
         if pd.notna(_sma100) and qqqm_data['price'] > _sma100:
@@ -1422,23 +1365,6 @@ with tab2:
             <p style="font-size:0.9em; color:#cbd5e1; margin-bottom:8px; font-weight:600;">SMA200</p>
             <p style="font-size:2.5em; font-weight:700; color:{_sc4}; margin:10px 0;">{_sma200_d}</p>
             <p style="font-size:1.1em; color:{_sc4}; font-weight:600;">{_ss4}</p>
-        </div>""", unsafe_allow_html=True)
-    with ic6:
-        if puddle_stage == 0:
-            _pt, _pc, _pi = "정상", "#10b981", "OK"
-        elif puddle_stage == 1:
-            _pt, _pc, _pi = "1단계 (SMA50)", "#fbbf24", "S1"
-        elif puddle_stage == 2:
-            _pt, _pc, _pi = "2단계 (SMA100)", "#f97316", "S2"
-        elif puddle_stage == 3:
-            _pt, _pc, _pi = "3단계 (SMA200)", "#ef4444", "S3"
-        else:
-            _pt, _pc, _pi = "4단계 (회복)", "#10b981", "S4"
-        st.markdown(f"""
-        <div style="text-align:center; padding:20px; background:linear-gradient(135deg,rgba(30,41,59,0.8),rgba(51,65,85,0.8)); border-radius:12px; border:2px solid {_pc};">
-            <p style="font-size:0.9em; color:#cbd5e1; margin-bottom:8px; font-weight:600;">웅덩이 단계</p>
-            <p style="font-size:2em; font-weight:700; color:{_pc}; margin:10px 0;">{_pi}</p>
-            <p style="font-size:1.1em; color:{_pc}; font-weight:600;">{_pt}</p>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
@@ -1624,96 +1550,19 @@ with tab2:
                             rows.append({"자산": sym, "CAGR": f"{m['CAGR']*100:.2f}%", "Sharpe": f"{m['Sharpe Ratio']:.2f}", "MDD": f"{m['Max Drawdown']*100:.2f}%", "전략수익": f"{m['strategy_return']*100:.2f}%"})
                     st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
 
-    # ── Execution plan ──
-    st.markdown("---")
-    st.subheader("실행 계획")
-    _status_lines = []
-    if defcon_triggered:
-        _status_lines.append("DEFCON 세이빙 발동: 신규 자금을 SGOV로만 배분")
-    if puddle_alert:
-        _deploy_base = float(sgov_value + cash_deposit)
-        _deploy_amount = compute_deployment(puddle_stage, _deploy_base)
-        _status_lines.append(f"웅덩이 단계 {puddle_stage}: 기준자금=${_deploy_base:,.2f}, 권장 투입=${_deploy_amount:,.2f}")
-    elif puddle_cooldown_active:
-        _status_lines.append(f"웅덩이 쿨다운 진행 중: {cooldown_info or '최근 30일 이내'}")
-    if smart_shoulder_triggered:
-        _status_lines.append("스마트 숄더 발동: 리밸런싱 필요")
-    if not _status_lines:
-        _status_lines.append("핵심 전략 정상 운용 중")
-    for _line in _status_lines:
-        st.markdown(f"- {_line}")
-    if new_cash > 0:
-        st.caption(f"신규 자금: ${new_cash:,.2f} | 목표 비중: 72/16/2/10")
-
-    # ── Market driver analysis ──
-    @st.cache_data(ttl=1800)
-    def get_market_summary(symbol):
-        news_list = []
-        try:
-            feed_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
-            response = requests.get(feed_url, timeout=10)
-            if response.status_code != 200:
-                return news_list
-            root = ET.fromstring(response.content)
-            for item in root.findall('.//item')[:5]:
-                title = (item.findtext('title') or '').strip()
-                if not title:
-                    continue
-                news_list.append({
-                    'title': title,
-                    'publisher': (item.findtext('source') or 'Yahoo Finance').strip(),
-                    'link': (item.findtext('link') or '#').strip(),
-                })
-        except Exception:
-            pass
-        return news_list
-
-    def _interpret_asset(symbol, name, change_pct, news_list):
-        if change_pct > 1.0:
-            direction, detail = "강한 상승", "상승 모멘텀 확대"
-        elif change_pct > 0.3:
-            direction, detail = "상승", "완만한 상승"
-        elif change_pct > -0.3:
-            direction, detail = "보합", "제한적 움직임"
-        elif change_pct > -1.0:
-            direction, detail = "하락", "완만한 하락"
-        else:
-            direction, detail = "강한 하락", "하방 압력 확대"
-        return {'direction': direction, 'detail': detail, 'news': (news_list or [])[:2]}
-
-    with st.expander("오늘의 시장 동인", expanded=False):
-        with st.spinner('시장 동인 분석 중...'):
-            qqqm_news = get_market_summary('QQQM')
-            schd_news = get_market_summary('SCHD')
-            iau_news = get_market_summary('IAU')
-            qqqm_an = _interpret_asset('QQQM', '나스닥 100', qqqm_data['change_pct'], qqqm_news)
-            schd_an = _interpret_asset('SCHD', '배당 성장', schd_data['change_pct'], schd_news)
-            iau_an = _interpret_asset('IAU', '금', iau_data['change_pct'], iau_news)
-
-        for label, color, an, data in [
-            ("QQQM (나스닥 100)", "#10b981", qqqm_an, qqqm_data),
-            ("SCHD (배당 성장)", "#3b82f6", schd_an, schd_data),
-            ("IAU (금)", "#fbbf24", iau_an, iau_data),
-        ]:
-            _ic = "📈" if data['change_pct'] >= 0 else "📉"
-            st.markdown(f"**{label}** — {_ic} {data['change_pct']:+.2f}% | {an['direction']} ({an['detail']})")
-            for n in an['news']:
-                st.caption(f"  {n['title'][:60]}")
-
 # =====================================================================
 # TAB 3 — 거시경제 & 전략 (2-Layer: Facts + AI Orchestration)
 # =====================================================================
 with tab3:
     st.header("거시경제 & 전략")
+    st.markdown("""<p style='color:#64748b; font-size:0.85em; letter-spacing:0.05em;
+        margin-top:-10px; margin-bottom:16px;'>🌐 시장 이벤트 · 리스크 레이더 · AI 전략 · 뉴스 분석</p>""",
+        unsafe_allow_html=True)
     nb = news_brief if isinstance(news_brief, dict) else {}
 
     # =================================================================
     # A. 정보 레이어 — 엔진이 계산한 사실/원자료만 표시
-    #    ※ 이 레이어에서 전략 제안 문장을 쓰지 않는다.
     # =================================================================
-    st.markdown("""<p style='color:#64748b; font-size:0.85em; letter-spacing:0.05em;
-        margin-bottom:4px;'>📊 <b>정보 레이어</b> — 엔진이 계산한 사실 데이터</p>""",
-        unsafe_allow_html=True)
 
     # ── 1. 시장 이벤트 ──
     st.subheader("① 시장 이벤트")
@@ -2048,8 +1897,69 @@ with tab3:
 
     st.markdown("---")
 
-    # ── 7. 포트폴리오 관점 (엔진 원자료) ──
-    st.subheader("⑦ 포트폴리오 관점")
+    # ── 4. 오늘의 시장 동인 ──
+    @st.cache_data(ttl=1800)
+    def get_market_summary(symbol):
+        news_list = []
+        try:
+            feed_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
+            response = requests.get(feed_url, timeout=10)
+            if response.status_code != 200:
+                return news_list
+            root = ET.fromstring(response.content)
+            for item in root.findall('.//item')[:5]:
+                title = (item.findtext('title') or '').strip()
+                if not title:
+                    continue
+                news_list.append({
+                    'title': title,
+                    'publisher': (item.findtext('source') or 'Yahoo Finance').strip(),
+                    'link': (item.findtext('link') or '#').strip(),
+                })
+        except Exception:
+            pass
+        return news_list
+
+    def _interpret_asset(symbol, name, change_pct, news_list):
+        if change_pct > 1.0:
+            direction, detail = "강한 상승", "상승 모멘텀 확대"
+        elif change_pct > 0.3:
+            direction, detail = "상승", "완만한 상승"
+        elif change_pct > -0.3:
+            direction, detail = "보합", "제한적 움직임"
+        elif change_pct > -1.0:
+            direction, detail = "하락", "완만한 하락"
+        else:
+            direction, detail = "강한 하락", "하방 압력 확대"
+        return {'direction': direction, 'detail': detail, 'news': (news_list or [])[:2]}
+
+    st.subheader("④ 오늘의 시장 동인")
+    with st.spinner('시장 동인 분석 중...'):
+        qqqm_news = get_market_summary('QQQM')
+        schd_news = get_market_summary('SCHD')
+        iau_news = get_market_summary('IAU')
+        qqqm_an = _interpret_asset('QQQM', '나스닥 100', qqqm_data['change_pct'], qqqm_news)
+        schd_an = _interpret_asset('SCHD', '배당 성장', schd_data['change_pct'], schd_news)
+        iau_an = _interpret_asset('IAU', '금', iau_data['change_pct'], iau_news)
+
+    for label, color, an, data in [
+        ("QQQM (나스닥 100)", "#10b981", qqqm_an, qqqm_data),
+        ("SCHD (배당 성장)", "#3b82f6", schd_an, schd_data),
+        ("IAU (금)", "#fbbf24", iau_an, iau_data),
+    ]:
+        _ic = "📈" if data['change_pct'] >= 0 else "📉"
+        st.markdown(f"""
+        <div style="background:#1e293b;border-left:4px solid {color};border-radius:8px;padding:12px 16px;margin-bottom:8px;">
+            <p style="color:#e2e8f0;font-weight:600;margin:0 0 4px;">
+                {_ic} <b>{label}</b> — {data['change_pct']:+.2f}% | {an['direction']} ({an['detail']})
+            </p>
+            {''.join(f"<p style='color:#94a3b8;font-size:0.85em;margin:2px 0 0 16px;'>{n['title'][:80]}</p>" for n in an['news'])}
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── 5. 포트폴리오 관점 (엔진 원자료) ──
+    st.subheader("⑤ 포트폴리오 관점")
     _aimp = nb.get("asset_implications", {}) if isinstance(nb.get("asset_implications"), dict) else {}
     _impact_rows = [
         {"자산": "QQQM", "관점": short_korean(_aimp.get("QQQM", "확인 필요"), 1)},
@@ -2059,16 +1969,16 @@ with tab3:
     ]
     st.dataframe(pd.DataFrame(_impact_rows), width='stretch', hide_index=True)
 
-    # ── 8. 체크 포인트 ──
-    st.subheader("⑧ 체크 포인트")
+    # ── 6. 체크 포인트 ──
+    st.subheader("⑥ 체크 포인트")
     _wp = nb.get("watch_points", [])
     if not isinstance(_wp, list):
         _wp = []
     for wp in (_wp or ["미국 10년물 금리", "VIX 방향", "유가 흐름"])[:4]:
         st.markdown(f"- {wp}")
 
-    # ── 9. 대표 뉴스 보기 ──
-    with st.expander("⑨ 대표 뉴스 보기", expanded=False):
+    # ── 7. 대표 뉴스 보기 ──
+    with st.expander("⑦ 대표 뉴스 보기", expanded=False):
         if market_news:
             for _ni in market_news[:5]:
                 _nt = (_ni.get("title") or "").strip()

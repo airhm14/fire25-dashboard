@@ -50,7 +50,7 @@ def get_strategy_advice(
         qqqm_sma200_gap=_sf(context.get("QQQM_SMA200_gap"), 0.0),
         treasury_10y=_sf(context.get("10Y_treasury"), 0.0),
         oil_price=_sf(context.get("oil_price"), 0.0),
-        macro_summary=str(context.get("macro_summary", "")),
+        macro_summary=str(context.get("macro_summary_text", context.get("macro_summary", ""))),
         top_news_summary=str(context.get("news_summary", "")),
         market_regime=str(context.get("regime", "")),
     )

@@ -14,6 +14,11 @@ from fire25.ai.model_registry import get_model_name
 
 STRATEGY_PROMPT = """
 당신은 TEAM FIRE 25의 전략가 A(Claude)입니다.
+[매크로 인텔리전스 활용 지침]
+- macro_events와 macro_summary는 뉴스 파이프라인 v2에서 추출된 구조화 신호입니다.
+- 단순 "시장 불확실성 → 현금 보유"가 아닌, 이벤트 유형·방향·확신도를 반영한 차별화된 판단을 내리세요.
+- liquidity_regime=tightening + nasdaq_bias=bearish 조합은 QQQM 비중 점검 신호입니다.
+- nasdaq_bias=bullish + tech_sector 이벤트가 있으면 성장주 모멘텀을 긍정적으로 해석하세요.
 
 [당신의 역할]
 - 동일한 입력을 받는 전략가 B(GPT)와 독립적으로 전략을 생성합니다.
@@ -62,6 +67,8 @@ Buy Fear · Rebalance Strength · Protect Core Asset · Compound Long Term
 [입력 데이터]
 포트폴리오: {portfolio_json}
 거시지표: {macro_json}
+
+{macro_intelligence_text}
 
 {news_snapshot_text}
 
@@ -139,6 +146,8 @@ def run(
     macro_context: dict,
     news_summary: str = "",
     news_snapshot: dict | None = None,
+    macro_events: list[dict] | None = None,
+    macro_summary: dict | None = None,
     api_key: str = "",
     model: str = "",
     timeout: float = 30.0,
@@ -156,17 +165,28 @@ def run(
 
     _model = model or get_model_name("claude")
 
-    # news_snapshot 이 있으면 구조화 텍스트 사용, 없으면 기존 news_summary fallback
+    # news_snapshot이 있으면 구조화 텍스트 사용, 없으면 기존 news_summary fallback
     if news_snapshot and news_snapshot.get("_source") != "fallback":
         from fire25.agents.news_snapshot import snapshot_to_prompt
         _news_text = snapshot_to_prompt(news_snapshot)
     else:
         _news_text = f"뉴스 요약: {news_summary}" if news_summary else "[뉴스 데이터 없음]"
 
+    # Macro intelligence block (v2 pipeline)
+    _macro_intel_parts: list[str] = []
+    if macro_events:
+        from fire25.macro_event_builder import macro_events_to_prompt
+        _macro_intel_parts.append(macro_events_to_prompt(macro_events))
+    if macro_summary and macro_summary.get("event_count"):
+        from fire25.macro_summary_engine import macro_summary_to_prompt
+        _macro_intel_parts.append(macro_summary_to_prompt(macro_summary))
+    _macro_intel_text = "\n\n".join(_macro_intel_parts) if _macro_intel_parts else "[매크로 인텔리전스 없음]"
+
     prompt = STRATEGY_PROMPT.format(
         regime=regime,
         portfolio_json=json.dumps(portfolio, ensure_ascii=False),
         macro_json=json.dumps(macro_context, ensure_ascii=False),
+        macro_intelligence_text=_macro_intel_text,
         news_snapshot_text=_news_text,
     )
 

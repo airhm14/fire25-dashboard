@@ -74,6 +74,51 @@ def _date_sort_key(date_str: str) -> int:
     return 0
 
 
+def normalize_macro_events(events: list[dict] | None) -> list[dict]:
+    """Normalize macro_events for deterministic context inclusion.
+
+    Strips internal ``_*`` ranking fields and enforces canonical field types.
+    Output is sorted alphabetically by (type, title) for hash stability.
+    """
+    if not events:
+        return []
+    normalized: list[dict] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        normalized.append({
+            "type":             str(ev.get("type", "")).strip(),
+            "title":            str(ev.get("title", "")).strip(),
+            "impact_direction": str(ev.get("impact_direction", "neutral")).strip(),
+            "confidence":       round(float(ev.get("confidence", 0.0)), 2),
+            "source":           str(ev.get("source", "")).strip(),
+            "date":             str(ev.get("date", "")).strip(),
+        })
+    normalized.sort(key=lambda x: (x["type"], x["title"]))
+    return normalized
+
+
+def normalize_macro_summary(summary: dict | None) -> dict:
+    """Normalize macro_summary dict for deterministic context inclusion."""
+    if not summary or not isinstance(summary, dict):
+        return {
+            "liquidity_regime":    "neutral",
+            "risk_sentiment":      "neutral",
+            "nasdaq_bias":         "neutral",
+            "macro_risk_level":    0.50,
+            "dominant_event_types": [],
+            "event_count":         0,
+        }
+    return {
+        "liquidity_regime":    str(summary.get("liquidity_regime", "neutral")),
+        "risk_sentiment":      str(summary.get("risk_sentiment", "neutral")),
+        "nasdaq_bias":         str(summary.get("nasdaq_bias", "neutral")),
+        "macro_risk_level":    round(float(summary.get("macro_risk_level", 0.5)), 2),
+        "dominant_event_types": sorted(summary.get("dominant_event_types", [])),
+        "event_count":         int(summary.get("event_count", 0)),
+    }
+
+
 def normalize_news(articles: list[dict] | None) -> list[dict]:
     """뉴스 정규화: date desc → source asc → title asc, 중복 제거."""
     if not articles:
@@ -168,6 +213,9 @@ def build_decision_context(
     risk_radar: dict | None = None,
     # News snapshot (구조화 이벤트 기반)
     news_snapshot: dict | None = None,
+    # Macro intelligence layer (v2 pipeline)
+    macro_events: list[dict] | None = None,
+    macro_summary: dict | None = None,
 ) -> dict:
     """정규화된 decision context 스냅샷 반환.
 
@@ -223,6 +271,10 @@ def build_decision_context(
     # ── News Snapshot (구조화 이벤트 기반) ────────────────────
     _snapshot = news_snapshot if isinstance(news_snapshot, dict) else {}
 
+    # ── Macro intelligence (v2 pipeline) ──────────────────────
+    _macro_events = normalize_macro_events(macro_events)
+    _macro_summary = normalize_macro_summary(macro_summary)
+
     return {
         "timestamp_bucket": get_timestamp_bucket(),
         "regime": str(regime),
@@ -231,7 +283,9 @@ def build_decision_context(
         "signals": signals,
         "news_items": norm_news,
         "manual_state": manual_state,
-        "macro_summary": str(macro_summary_text or ""),
+        "macro_summary_text": str(macro_summary_text or ""),
+        "macro_summary": _macro_summary,
+        "macro_events": _macro_events,
         "news_summary": str(news_summary_text or ""),
         "news_snapshot": _snapshot,
     }

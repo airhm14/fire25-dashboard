@@ -36,6 +36,8 @@ from fire25.ai.decision_context_builder import (
     normalize_news,
 )
 from fire25.storage.strategy_cache import get_cached_strategy, store_strategy
+from fire25.macro_event_builder import build_macro_events
+from fire25.macro_summary_engine import generate_macro_summary
 
 # ── Module-level state for strategy consistency ──────────────────
 _prev_regime: str = ""
@@ -140,6 +142,8 @@ def run(
         "regime_lock_exception": None,
         "decision_context": None,
         "news_snapshot": None,
+        "macro_events": [],
+        "macro_summary": {},
     }
 
     # ── Step 1: Regime Gate (with persistence filter) ────────────
@@ -171,6 +175,31 @@ def run(
     if isinstance(theme_info, dict):
         nb_for_ctx["theme_info"] = theme_info
 
+    # ── Step 2b: Macro intelligence pipeline (v2) ────────────────
+    # Use passed-in enriched articles if available; otherwise fetch via v2.
+    # Articles are considered enriched when they carry an impact_score field.
+    _enriched_for_macro = _articles
+    _articles_are_enriched = _articles and any(
+        a.get("impact_score") is not None for a in _articles[:3]
+    )
+    if not _articles_are_enriched:
+        try:
+            from fire25.news_engine_v2 import get_enriched_articles as _get_v2
+            _enriched_for_macro = _get_v2() or _articles
+        except Exception:
+            _enriched_for_macro = _articles
+
+    _macro_events: list[dict] = []
+    _macro_summary: dict = {}
+    try:
+        _macro_events = build_macro_events(_enriched_for_macro)
+        _macro_summary = generate_macro_summary(_macro_events)
+    except Exception:
+        pass
+
+    result["macro_events"] = _macro_events
+    result["macro_summary"] = _macro_summary
+
     decision_ctx = build_decision_context(
         portfolio=_portfolio,
         vix=vix,
@@ -188,6 +217,8 @@ def run(
         news_items=_articles,
         shock_events=_macro.get("shock_events"),
         risk_radar=_macro.get("risk_radar"),
+        macro_events=_macro_events,
+        macro_summary=_macro_summary,
     )
     result["decision_context"] = decision_ctx
 
@@ -288,6 +319,8 @@ def run(
         macro_context=_macro,
         news_summary=_news_for_strategy,
         news_snapshot=_news_snapshot,
+        macro_events=_macro_events,
+        macro_summary=_macro_summary,
         api_key=claude_api_key,
         model=_claude_model,
     )
@@ -300,6 +333,8 @@ def run(
         macro_context=_macro,
         news_summary=_news_for_strategy,
         news_snapshot=_news_snapshot,
+        macro_events=_macro_events,
+        macro_summary=_macro_summary,
         api_key=openai_api_key,
         model=_gpt_model,
     )

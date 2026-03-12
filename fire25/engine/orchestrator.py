@@ -130,7 +130,7 @@ def run(
         "conflict": None,
         "final_strategy": None,
         "discussion": None,
-        "guard_violations": [],
+        "guard_violations": {"claude": [], "gpt": [], "final": []},
         "api_calls": 0,
         "strategy_consistency": None,
         "puddle_cooldown_blocked": False,

@@ -7,15 +7,15 @@
   3. strategy_hash 생성
   4. 캐시 조회 (hit → 기존 전략 반환)
   5. Regime Lock 체크 (예외 조건 아니면 유지)
-  6. Gemini 뉴스 수집
-  7. Claude/GPT 독립 전략 생성
-  8. Conflict Detection
-  9. Discussion (충돌 시)
-  10. Manual Guard
-  11. Strategy Stabilizer
-  12. 전략 + strategy_hash 캐시 저장
-
-기본 3콜, 충돌 시 5콜, 캐시 hit 시 0콜.
+  5c. PUDDLE 동적 비중 산출
+  5d. 조기 경보 신호 판정
+  6a. Gemini 뉴스 수집
+  6b. News Agent digest 생성
+  6c. Signal Conflict Analyzer (Claude 해석)
+  6d. Cross Validator (o1 교차 검증)
+  7. 최종 전략 구성 (signal_analyzer 기반)
+  8. Manual Guard
+  9. 전략 + strategy_hash 캐시 저장
 """
 
 from __future__ import annotations
@@ -25,8 +25,6 @@ import json
 from typing import Any
 
 from fire25.engine.regime_gate import classify as classify_regime, RegimeResult
-from fire25.engine.conflict_detector import detect as detect_conflict, ConflictResult
-from fire25.engine.discussion_engine import run_discussion
 from fire25.strategy_v2.manual_guard import validate as manual_guard_validate
 from fire25.strategy_v2.manual_guard import (
     check_puddle_cooldown,
@@ -40,7 +38,7 @@ from fire25.agents.news_agent import run as news_agent_run
 from fire25.agents.signal_analyzer import analyze as signal_analyzer_analyze
 from fire25.agents.cross_validator import validate as cross_validator_validate
 from fire25.strategy_v2.execution_plan import build_plan
-from fire25.agents import gemini_agent, claude_agent, gpt_agent
+from fire25.agents import gemini_agent
 from fire25.ai.decision_context_builder import (
     build_decision_context,
     compute_strategy_hash,
@@ -129,7 +127,8 @@ def run(
     """Execute full AI orchestration pipeline with strategy consistency.
 
     Returns a comprehensive result dict with:
-      - regime, gemini, claude_raw, gpt_raw, conflict, final_strategy
+      - regime, gemini, final_strategy
+      - signal_analysis, cross_validation
       - strategy_hash, cache_hit, regime_changed, reused_strategy
       - decision_context snapshot
     """
@@ -139,19 +138,13 @@ def run(
     from fire25.ai.model_registry import get_model_name
 
     _gemini_model = get_model_name("gemini", models_config)
-    _claude_model = get_model_name("claude", models_config)
-    _gpt_model = get_model_name("openai", models_config)
 
     api_calls = 0
     result: dict[str, Any] = {
         "regime": None,
         "gemini": None,
-        "claude_raw": None,
-        "gpt_raw": None,
-        "conflict": None,
         "final_strategy": None,
-        "discussion": None,
-        "guard_violations": {"claude": [], "gpt": [], "final": []},
+        "guard_violations": {"final": []},
         "api_calls": 0,
         "strategy_consistency": None,
         "puddle_cooldown_blocked": False,
@@ -369,11 +362,6 @@ def run(
     strategy_hash = compute_strategy_hash(decision_ctx)
     result["strategy_hash"] = strategy_hash
 
-    # Enrich news summary (fallback용)
-    _news_for_strategy = news_summary
-    if gemini_result.get("_source") == "gemini":
-        _news_for_strategy = gemini_result.get("headline_summary", "") or news_summary
-
     # ── Step 6b: News Agent → digest 생성 ────────────────────────
     _news_agent_items = _to_news_agent_items(_articles)
     if _news_agent_items:
@@ -439,70 +427,43 @@ def run(
     except Exception:
         result["cross_validation"] = {}
 
-    # ── Step 7: Claude + GPT independent strategies ──────────────
-    claude_result = claude_agent.run(
-        regime=regime,
-        portfolio=_portfolio,
-        macro_context=_macro,
-        news_summary=_news_for_strategy,
-        news_snapshot=_news_snapshot,
-        macro_events=_macro_events,
-        macro_summary=_macro_summary,
-        api_key=claude_api_key,
-        model=_claude_model,
+    # ── Step 7: 최종 전략 구성 (signal_analyzer 기반) ─────────────
+    _sa_result = result["signal_analysis"]
+    _cv_result = result["cross_validation"]
+    _sa_cl = _sa_result.get("claude_analysis") or {}
+    _market_view = (
+        _sa_cl.get("situation_summary")
+        or f"Regime: {regime} — 신호 분석 기반 전략"
     )
-    api_calls += 1
-    result["claude_raw"] = claude_result
-
-    gpt_result = gpt_agent.run(
-        regime=regime,
-        portfolio=_portfolio,
-        macro_context=_macro,
-        news_summary=_news_for_strategy,
-        news_snapshot=_news_snapshot,
-        macro_events=_macro_events,
-        macro_summary=_macro_summary,
-        api_key=openai_api_key,
-        model=_gpt_model,
+    _strategy_reason = _sa_cl.get("key_risk") or ""
+    _cash_action = {
+        "NORMAL": "KEEP",
+        "DEFCON": "INCREASE",
+        "SMART_SHOULDER": "KEEP",
+    }.get(regime, "DEPLOY" if regime.startswith("PUDDLE_") else "KEEP")
+    _cv_vr = (_cv_result.get("validation_result") or "")
+    _conf_raw = (
+        _cv_result.get("confidence_score")
+        if _cv_vr not in ("not_required", "")
+        else _sa_result.get("confidence_score")
     )
-    api_calls += 1
-    result["gpt_raw"] = gpt_result
+    _conf_score = int(_conf_raw) if _conf_raw is not None else 50
 
-    # ── Step 8: Manual Guard check ───────────────────────────────
-    claude_violations = manual_guard_validate(claude_result, regime, portfolio=_portfolio)
-    gpt_violations = manual_guard_validate(gpt_result, regime, portfolio=_portfolio)
-    result["guard_violations"] = {
-        "claude": claude_violations,
-        "gpt": gpt_violations,
+    final: dict[str, Any] = {
+        "_source": "signal_analyzer",
+        "market_view": _market_view,
+        "strategy_reason": _strategy_reason,
+        "cash_action": _cash_action,
+        "confidence_score": _conf_score,
+        "recommended_actions": [
+            {"ticker": "QQQM", "action": "HOLD", "amount": 0},
+            {"ticker": "SCHD", "action": "HOLD", "amount": 0},
+            {"ticker": "IAU", "action": "HOLD", "amount": 0},
+            {"ticker": "SGOV", "action": "HOLD", "amount": 0},
+        ],
     }
 
-    # ── Step 9: Conflict Detection ───────────────────────────────
-    conflict: ConflictResult = detect_conflict(
-        claude_result, gpt_result, portfolio=_portfolio,
-    )
-    result["conflict"] = conflict.to_dict()
-
-    # ── Step 10: Discussion if needed ────────────────────────────
-    if conflict.agreed:
-        c_conf = int(claude_result.get("confidence_score", 50))
-        g_conf = int(gpt_result.get("confidence_score", 50))
-        winner = claude_result if c_conf >= g_conf else gpt_result
-        final = {**winner, "_source": "consensus"}
-    else:
-        final = run_discussion(
-            regime=regime,
-            claude_strategy=claude_result,
-            gpt_strategy=gpt_result,
-            conflict_reasons=conflict.conflict_reasons,
-            claude_api_key=claude_api_key,
-            openai_api_key=openai_api_key,
-            claude_model=_claude_model,
-            gpt_model=_gpt_model,
-        )
-        api_calls += 2
-        result["discussion"] = final.get("_discussion")
-
-    # ── Step 11: Final Manual Guard pass ─────────────────────────
+    # ── Step 8: Final Manual Guard pass ──────────────────────────
     final_violations = manual_guard_validate(final, regime, portfolio=_portfolio)
     if final_violations:
         final = _apply_guard_corrections(final, final_violations, regime)

@@ -1724,11 +1724,11 @@ with tab3:
 
     # =================================================================
     # B. AI 전략 오케스트레이터 (통합)
-    #    Regime Gate → Gemini(뉴스) → Claude+GPT(독립 전략) → 합의/토론
-    #    → Manual Guard → Strategy Stabilizer → 실행 계획
+    #    Regime Gate → Gemini(뉴스) → News Agent → Signal Analyzer(Claude)
+    #    → Cross Validator(o1) → Manual Guard → 실행 계획
     # =================================================================
     st.markdown("""<p style='color:#f59e0b; font-size:0.85em; letter-spacing:0.05em;
-        margin-bottom:4px;'>⚡ <b>AI 전략 오케스트레이터</b> — Regime Gate · Gemini · Claude vs GPT · Manual Guard</p>""",
+        margin-bottom:4px;'>⚡ <b>AI 전략 오케스트레이터</b> — Regime Gate · Gemini · Signal Analyzer · Cross Validator</p>""",
         unsafe_allow_html=True)
 
     if st.button("🚀 AI 전략 실행", width='stretch', key="ai_orch"):
@@ -1776,7 +1776,7 @@ with tab3:
         nb = news_brief if isinstance(news_brief, dict) else {}
         _news_text = short_korean(str(nb.get("headline_summary", "")), 2)
 
-        with st.spinner("AI 전략 오케스트레이션 중... (기본 3콜, 충돌 시 5콜)"):
+        with st.spinner("AI 전략 오케스트레이션 중... (Gemini · Claude · o1)"):
             orch_result = orchestrator_run(
                 defcon_triggered=defcon_triggered,
                 puddle_stage=puddle_result.stage,
@@ -2228,64 +2228,8 @@ with tab3:
   </p>
 </div>""", unsafe_allow_html=True)
 
-        # ══ Section 8: 기존 전략 결과 ════════════════════════════════
+        # ══ Section 8: 최종 전략 결과 ═══════════════════════════════
         st.divider()
-        # ── Claude vs GPT 비교 ──
-        _cr = orch_result.get("claude_raw") or {}
-        _gr = orch_result.get("gpt_raw") or {}
-        _conflict = orch_result.get("conflict") or {}
-        _agreed = _conflict.get("agreed", True)
-
-        col_c, col_g = st.columns(2)
-        with col_c:
-            _c_err = _cr.get("_debug_error")
-            _c_border = "#a855f7" if not _c_err else "#ef4444"
-            st.markdown(f"""
-            <div style="background:#1e293b;border:1px solid {_c_border};border-radius:10px;padding:14px;">
-                <p style="color:#c084fc;font-weight:700;margin:0 0 8px;">🔮 Claude (전략가 A)</p>
-                <p style="color:#e2e8f0;font-size:0.9em;margin:4px 0;">{_cr.get('market_view','—')}</p>
-                <p style="color:#94a3b8;font-size:0.8em;margin:4px 0;">💡 {_cr.get('strategy_reason','—')}</p>
-                <p style="color:#cbd5e1;font-size:0.85em;margin:4px 0;">현금: <b>{_cr.get('cash_action','—')}</b> | 신뢰도: <b>{_cr.get('confidence_score', 0)}</b></p>
-            </div>""", unsafe_allow_html=True)
-            if _cr.get("recommended_actions"):
-                _c_acts = _cr["recommended_actions"]
-                for _a in _c_acts:
-                    _act_color = {"BUY": "#34d399", "REDUCE": "#f87171"}.get(_a.get("action",""), "#94a3b8")
-                    if _a.get("action") != "HOLD":
-                        st.markdown(f"<span style='color:{_act_color};font-size:0.85em;'>{_a.get('ticker')} {_a.get('action')} {_a.get('amount',0)}주</span>", unsafe_allow_html=True)
-
-        with col_g:
-            _g_err = _gr.get("_debug_error")
-            _g_border = "#10b981" if not _g_err else "#ef4444"
-            st.markdown(f"""
-            <div style="background:#1e293b;border:1px solid {_g_border};border-radius:10px;padding:14px;">
-                <p style="color:#34d399;font-weight:700;margin:0 0 8px;">🧠 GPT (전략가 B)</p>
-                <p style="color:#e2e8f0;font-size:0.9em;margin:4px 0;">{_gr.get('market_view','—')}</p>
-                <p style="color:#94a3b8;font-size:0.8em;margin:4px 0;">💡 {_gr.get('strategy_reason','—')}</p>
-                <p style="color:#cbd5e1;font-size:0.85em;margin:4px 0;">현금: <b>{_gr.get('cash_action','—')}</b> | 신뢰도: <b>{_gr.get('confidence_score',0)}</b></p>
-            </div>""", unsafe_allow_html=True)
-            if _gr.get("recommended_actions"):
-                _g_acts = _gr["recommended_actions"]
-                for _a in _g_acts:
-                    _act_color = {"BUY": "#34d399", "REDUCE": "#f87171"}.get(_a.get("action",""), "#94a3b8")
-                    if _a.get("action") != "HOLD":
-                        st.markdown(f"<span style='color:{_act_color};font-size:0.85em;'>{_a.get('ticker')} {_a.get('action')} {_a.get('amount',0)}주</span>", unsafe_allow_html=True)
-
-        # ── 합의/충돌 ──
-        if _agreed:
-            st.success("✅ Claude와 GPT가 합의했습니다.")
-        else:
-            st.warning("⚠️ 전략가 간 충돌 발생 → 토론 1라운드 실행됨")
-            for _cr_reason in _conflict.get("conflict_reasons", []):
-                st.markdown(f"- {_cr_reason}")
-
-        # ── 토론 결과 ──
-        _disc = orch_result.get("discussion")
-        if _disc:
-            with st.expander("🗣 토론 내용", expanded=False):
-                st.markdown(f"**Claude 검토:** {_disc.get('claude_review', '—')}")
-                st.markdown(f"**GPT 반영:** {_disc.get('discussion_note', '—')}")
-                st.markdown(f"토론 라운드: {_disc.get('rounds', 0)}")
 
         # ── 최종 전략 ──
         _final = orch_result.get("final_strategy", {})
@@ -2368,12 +2312,12 @@ with tab3:
             return "🟡", "fallback"
 
         _gem_dot, _gem_msg = _status_dot(_gemini_data.get("_source"), _gemini_data.get("_debug_error"))
-        _c_dot, _c_msg = _status_dot(_cr.get("_source"), _cr.get("_debug_error"))
-        _g_dot, _g_msg = _status_dot(_gr.get("_source"), _gr.get("_debug_error"))
+        _sa_data = orch_result.get("signal_analysis") or {}
+        _sa_err = (_sa_data.get("claude_analysis") or {}).get("_error", "")
+        _sa_dot, _sa_msg = _status_dot("ok" if _sa_data else None, _sa_err)
         with st.expander("🔍 AI 상태 진단", expanded=False):
             st.markdown(f"{_gem_dot} **Gemini** (`{_gem_model}`) — {_gem_msg}")
-            st.markdown(f"{_c_dot} **Claude** (`{_cr.get('_agent','')}`) — {_c_msg}")
-            st.markdown(f"{_g_dot} **GPT** (`{_gr.get('_agent','')}`) — {_g_msg}")
+            st.markdown(f"{_sa_dot} **Signal Analyzer** (Claude) — {_sa_msg}")
             st.caption("🟢 정상 | 🟡 fallback (키 없음/SDK 없음) | 🔴 오류")
             st.markdown("---")
             st.markdown("**📋 일관성 메타데이터**")

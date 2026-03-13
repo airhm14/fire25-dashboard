@@ -23,9 +23,21 @@ import json
 import os
 import re
 from pathlib import Path
-
-from fire25.utils.api_keys import get_api_key
 from typing import Any
+
+import streamlit as st
+
+
+def _load_api_key(key_name: str) -> str:
+    # 1순위: st.secrets
+    try:
+        val = st.secrets.get(key_name, "")
+        if val:
+            return val
+    except Exception:
+        pass
+    # 2순위: 환경변수
+    return os.environ.get(key_name, "")
 
 # ── 상수 ─────────────────────────────────────────────────────────
 _MODEL_DEFAULT: str = "claude-sonnet-4-6"
@@ -376,7 +388,7 @@ def analyze(
             cache_hit (bool): 파일 캐시 적중 여부.
             analysis_hash (str): 캐시 키.
     """
-    _api_key = str(api_key or get_api_key("ANTHROPIC_API_KEY")).strip()
+    _api_key = str(api_key or _load_api_key("ANTHROPIC_API_KEY")).strip()
 
     # 1. 충돌 감지
     conflict_detected, conflict_type = _detect_conflict(payload)

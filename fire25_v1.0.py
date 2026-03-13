@@ -93,6 +93,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ── [DEBUG] Streamlit Cloud Secrets 로드 확인 (임시) ─────────────────
+try:
+    keys = list(st.secrets.keys())
+    st.sidebar.write("Secrets keys 감지:", keys)
+except Exception as e:
+    st.sidebar.write("Secrets 로드 실패:", str(e))
+# ── [DEBUG END] ───────────────────────────────────────────────────────
+
 # =====================================================================
 # Login gate
 # =====================================================================

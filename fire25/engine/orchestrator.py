@@ -27,7 +27,14 @@ from fire25.engine.regime_gate import classify as classify_regime, RegimeResult
 from fire25.engine.conflict_detector import detect as detect_conflict, ConflictResult
 from fire25.engine.discussion_engine import run_discussion
 from fire25.strategy_v2.manual_guard import validate as manual_guard_validate
-from fire25.strategy_v2.manual_guard import check_puddle_cooldown, record_puddle_buy
+from fire25.strategy_v2.manual_guard import (
+    check_puddle_cooldown,
+    record_puddle_buy,
+    get_last_puddle_buy_stage,
+    get_puddle_remaining_days,
+)
+from fire25.engine.puddle_sizing import compute_puddle_sizing
+from fire25.engine.signal_monitor import evaluate_signals
 from fire25.strategy_v2.execution_plan import build_plan
 from fire25.agents import gemini_agent, claude_agent, gpt_agent
 from fire25.ai.decision_context_builder import (
@@ -87,8 +94,18 @@ def run(
     market_confidence: float = 0.5,
     # --- Advanced regime inputs ---
     drawdown_pct: float = 0.0,
+    drawdown_from_200ma: float = 0.0,
     vix: float = 20.0,
     sma50_slope: float = 0.0,
+    breadth_score: float = 0.5,
+    # --- Signal monitor inputs ---
+    qqqm_price: float = 0.0,
+    qqqm_ma50: float = 0.0,
+    qqqm_ma200: float = 0.0,
+    qqqm_current_pct: float = 0.0,
+    qqqm_after_buy_pct: float | None = None,
+    spread_10y_2y: float = 0.0,
+    sgov_current_pct: float = 0.0,
     # --- News data ---
     articles: list[dict] | None = None,
     aggregated_signals: dict | None = None,
@@ -134,6 +151,8 @@ def run(
         "api_calls": 0,
         "strategy_consistency": None,
         "puddle_cooldown_blocked": False,
+        "puddle_sizing": {},
+        "signal_monitor": {},
         # 일관성 메타데이터
         "strategy_hash": "",
         "cache_hit": False,
@@ -287,6 +306,42 @@ def run(
         if check_puddle_cooldown(stage):
             result["puddle_cooldown_blocked"] = True
 
+    # ── Step 5c: PUDDLE 동적 비중 계수 산출 ──────────────────────
+    if regime.startswith("PUDDLE_") and regime_result.puddle_stage >= 2:
+        _puddle_sizing = compute_puddle_sizing(
+            puddle_stage=regime_result.puddle_stage,
+            vix=vix,
+            drawdown_from_200ma=drawdown_from_200ma,
+            breadth_score=breadth_score,
+        )
+        result["puddle_sizing"] = _puddle_sizing
+
+    # ── Step 5d: 조기 경보 신호 판정 ─────────────────────────────
+    _last_puddle_buy_stage = get_last_puddle_buy_stage()
+    _cooldown_remaining = 0
+    if regime.startswith("PUDDLE_"):
+        try:
+            _stage = int(regime.split("_")[1])
+            _cooldown_remaining = get_puddle_remaining_days(_stage)
+        except (IndexError, ValueError):
+            pass
+
+    _signal_result = evaluate_signals(
+        qqqm_price=qqqm_price,
+        qqqm_ma50=qqqm_ma50,
+        qqqm_ma200=qqqm_ma200,
+        qqqm_current_pct=qqqm_current_pct,
+        qqqm_after_buy_pct=qqqm_after_buy_pct,
+        vix=vix,
+        spread_10y_2y=spread_10y_2y,
+        sgov_current_pct=sgov_current_pct,
+        regime=regime,
+        puddle_stage=regime_result.puddle_stage if regime_result.puddle_stage > 0 else None,
+        last_puddle_buy_stage=_last_puddle_buy_stage,
+        cooldown_remaining_days=_cooldown_remaining,
+    )
+    result["signal_monitor"] = _signal_result
+
     # ── Step 6: Gemini News → 구조화 이벤트 추출 + Snapshot ─────
     gemini_result = gemini_agent.run(
         articles=_articles,
@@ -385,6 +440,12 @@ def run(
     if result["puddle_cooldown_blocked"]:
         _force_hold_buys(final)
         final["_puddle_cooldown_note"] = "동일 PUDDLE 단계 30일 쿨다운 → 매수 차단"
+
+    # ── Step 12b: Signal monitor buy block enforcement ────────────
+    if _signal_result.get("buy_blocked") and not result["puddle_cooldown_blocked"]:
+        _force_hold_buys(final)
+        codes = [r["code"] for r in _signal_result.get("block_reasons", [])]
+        final["_signal_monitor_note"] = f"조기 경보 차단: {', '.join(codes)}"
 
     # ── Step 13: Build execution plan ────────────────────────────
     final["execution_plan"] = build_plan(

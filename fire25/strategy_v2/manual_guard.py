@@ -283,6 +283,32 @@ def check_puddle_cooldown(stage: int, cooldown_days: int = 30) -> bool:
     return elapsed < (cooldown_days * 86400)
 
 
+def get_last_puddle_buy_stage() -> int | None:
+    """Return the most recently bought PUDDLE stage, or None if no history."""
+    if not _puddle_buy_history:
+        return None
+    return max(_puddle_buy_history.keys(), key=lambda s: _puddle_buy_history[s])
+
+
+def get_puddle_remaining_days(stage: int, cooldown_days: int = 30) -> int:
+    """Return remaining cooldown days for given PUDDLE stage.
+
+    Args:
+        stage: PUDDLE 단계.
+        cooldown_days: 쿨다운 기간 (일). 기본 30일.
+
+    Returns:
+        잔여 일수. 쿨다운 미적용 시 0.
+    """
+    import time
+    last_buy = _puddle_buy_history.get(stage)
+    if last_buy is None:
+        return 0
+    elapsed_days = (time.time() - last_buy) / 86400
+    remaining = cooldown_days - elapsed_days
+    return max(0, int(remaining))
+
+
 def reset_puddle_history() -> None:
     """Reset PUDDLE buy history (for testing)."""
     _puddle_buy_history.clear()

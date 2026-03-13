@@ -31,7 +31,7 @@ import streamlit as st
 def _load_api_key(key_name: str) -> str:
     # 1순위: st.secrets
     try:
-        val = st.secrets.get(key_name, "")
+        val = st.secrets[key_name]
         if val:
             return val
     except Exception:

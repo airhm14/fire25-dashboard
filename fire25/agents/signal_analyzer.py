@@ -23,6 +23,8 @@ import json
 import os
 import re
 from pathlib import Path
+
+from fire25.utils.api_keys import get_api_key
 from typing import Any
 
 # ── 상수 ─────────────────────────────────────────────────────────
@@ -374,7 +376,7 @@ def analyze(
             cache_hit (bool): 파일 캐시 적중 여부.
             analysis_hash (str): 캐시 키.
     """
-    _api_key = str(api_key or os.getenv("ANTHROPIC_API_KEY", "")).strip()
+    _api_key = str(api_key or get_api_key("ANTHROPIC_API_KEY")).strip()
 
     # 1. 충돌 감지
     conflict_detected, conflict_type = _detect_conflict(payload)

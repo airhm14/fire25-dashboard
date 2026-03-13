@@ -19,6 +19,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from fire25.utils.api_keys import get_api_key
+
 # ── 상수 ─────────────────────────────────────────────────────────
 _MODEL_PRIMARY: str = "o1"
 _MODEL_FALLBACK: str = "gpt-4o"
@@ -353,7 +355,7 @@ def validate(
     if not conflict_detected:
         return dict(_NOT_REQUIRED)
 
-    _api_key = str(api_key or os.getenv("OPENAI_API_KEY", "")).strip()
+    _api_key = str(api_key or get_api_key("OPENAI_API_KEY")).strip()
     _model = str(model or _MODEL_PRIMARY).strip() or _MODEL_PRIMARY
 
     # 사전 규칙 위반 감지 (API 불필요)

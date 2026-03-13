@@ -1724,9 +1724,10 @@ with tab3:
         unsafe_allow_html=True)
 
     if st.button("🚀 AI 전략 실행", width='stretch', key="ai_orch"):
-        _gemini_key = st.secrets.get("GEMINI_API_KEY", "")
-        _claude_key = st.secrets.get("ANTHROPIC_API_KEY", "")
-        _openai_key = st.secrets.get("OPENAI_API_KEY", "")
+        from fire25.utils.api_keys import get_api_key as _get_key
+        _gemini_key = _get_key("GEMINI_API_KEY")
+        _claude_key = _get_key("ANTHROPIC_API_KEY")
+        _openai_key = _get_key("OPENAI_API_KEY")
         _models_cfg = dict(st.secrets.get("models", {}))
 
         from fire25.engine.orchestrator import run as orchestrator_run

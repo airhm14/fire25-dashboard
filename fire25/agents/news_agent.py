@@ -22,6 +22,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from fire25.utils.api_keys import get_api_key
+
 # ── 상수 ─────────────────────────────────────────────────────────
 _MODEL_DEFAULT: str = "gemini-1.5-flash"
 _CACHE_DIR: Path = Path(__file__).parent.parent / "cache"
@@ -434,7 +436,7 @@ def run(
             digest (dict): top_signals, one_line_summary.
             error (str|None): 오류 코드 (정상 시 None).
     """
-    _api_key = str(api_key or os.getenv("GEMINI_API_KEY", "")).strip()
+    _api_key = str(api_key or get_api_key("GEMINI_API_KEY")).strip()
 
     if not news_items:
         return {**_FALLBACK, "error": "no_news_items"}

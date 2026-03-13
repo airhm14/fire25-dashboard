@@ -106,8 +106,8 @@ def evaluate_signals(
 
     # ── 알림 신호 (차단 없음) ────────────────────────────────────────
 
-    # 1. VIX_SPIKE: VIX ≥ 20 이고 QQQM이 200일선 5% 이내
-    if vix >= 20 and qqqm_price < qqqm_ma200 * 1.05:
+    # 1. VIX_SPIKE: VIX ≥ 20 (200일선 조건 제거 — MA50 이탈은 별도 실행 규칙에서 처리)
+    if vix >= 20:
         alerts.append({
             "code": "VIX_SPIKE",
             "type": "alert",

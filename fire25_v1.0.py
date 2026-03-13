@@ -1843,6 +1843,122 @@ with tab3:
             <span>♻️ 전략: {_reuse_label}</span>
         </div>""", unsafe_allow_html=True)
 
+        # ── 에러 표시 헬퍼 ──────────────────────────────────────────
+        def _show_agent_error(error: str) -> bool:
+            """에러 문자열 → 통합 경고 표시. 에러가 있으면 True 반환."""
+            if not error:
+                return False
+            if "missing_api_key" in error:
+                st.warning("🔑 API key가 설정되지 않았습니다")
+            elif "parse_error" in error:
+                st.warning("⚠️ 응답 파싱 실패 — 재시도 후에도 실패")
+            elif "api_error" in error:
+                st.error("🔴 API 호출 실패")
+            else:
+                st.warning(f"⚠️ {error}")
+            return True
+
+        # ══ Section 2: PUDDLE 동적 비중 ══════════════════════════════
+        _ps = orch_result.get("puddle_sizing") or {}
+        if _ps and _ps.get("puddle_stage"):
+            st.divider()
+            _ps_stage = _ps.get("puddle_stage", 0)
+            _ps_base = _ps.get("base_pct", 0)
+            _ps_coeff = _ps.get("coefficient", 1.0)
+            _ps_adj = _ps.get("adjusted_pct", 0)
+            _ps_capped = _ps.get("capped_pct", 0)
+            _ps_cap_applied = _ps.get("cap_applied", False)
+            _ps_reason = _ps.get("reason", "")
+            _ps_bd = _ps.get("coefficient_breakdown") or {}
+            _ps_coeff_color = "#10b981" if _ps_coeff >= 1.0 else "#ef4444"
+            _ps_cap_label = " 📌캡 적용" if _ps_cap_applied else ""
+            st.markdown(f"""
+<div style="background:#1e293b;border:1px solid #3b82f6;border-radius:10px;padding:16px;margin-bottom:12px;">
+  <p style="color:#60a5fa;font-weight:700;margin:0 0 12px;">📐 PUDDLE 동적 비중 — PUDDLE_{_ps_stage}</p>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;">
+    <div style="text-align:center;background:#0f172a;border-radius:8px;padding:10px 16px;">
+      <p style="color:#64748b;font-size:0.75em;margin:0;">기준 비중</p>
+      <p style="color:#e2e8f0;font-weight:700;font-size:1.1em;margin:4px 0;">{_ps_base}%</p>
+    </div>
+    <div style="text-align:center;background:#0f172a;border-radius:8px;padding:10px 16px;">
+      <p style="color:#64748b;font-size:0.75em;margin:0;">동적 계수</p>
+      <p style="color:{_ps_coeff_color};font-weight:700;font-size:1.1em;margin:4px 0;">×{_ps_coeff:.1f}</p>
+    </div>
+    <div style="text-align:center;background:#0f172a;border-radius:8px;padding:10px 16px;">
+      <p style="color:#64748b;font-size:0.75em;margin:0;">조정 비중</p>
+      <p style="color:#94a3b8;font-size:1em;margin:4px 0;">{_ps_adj}%</p>
+    </div>
+    <div style="text-align:center;background:#0f172a;border-radius:8px;padding:10px 16px;border:1px solid #3b82f6;">
+      <p style="color:#64748b;font-size:0.75em;margin:0;">최종 비중{_ps_cap_label}</p>
+      <p style="color:#60a5fa;font-weight:700;font-size:1.2em;margin:4px 0;">{_ps_capped}%</p>
+    </div>
+  </div>
+  {"<p style='color:#94a3b8;font-size:0.82em;margin:4px 0;'><span style='color:#64748b;'>VIX:</span> {:+.2f} &nbsp; <span style='color:#64748b;'>낙폭:</span> {:+.2f} &nbsp; <span style='color:#64748b;'>섹터:</span> {:+.2f}</p>".format(_ps_bd.get("vix_adj",0),_ps_bd.get("drawdown_adj",0),_ps_bd.get("breadth_adj",0)) if _ps_bd else ""}
+  {"<p style='color:#94a3b8;font-size:0.82em;margin:4px 0;'>{}</p>".format(_ps_reason) if _ps_reason else ""}
+</div>""", unsafe_allow_html=True)
+
+        # ══ Section 3: 조기 경보 신호 현황 ═══════════════════════════
+        _sm = orch_result.get("signal_monitor") or {}
+        if _sm:
+            st.divider()
+            _sm_blocked = _sm.get("buy_blocked", False)
+            _sm_blocks = _sm.get("block_reasons") or []
+            _sm_alerts = _sm.get("alerts") or []
+            _sm_border = "#ef4444" if _sm_blocked else "#10b981" if not _sm_alerts else "#f59e0b"
+            _sm_status = "🚫 매수 차단" if _sm_blocked else ("⚠️ 알림 있음" if _sm_alerts else "✅ 정상")
+            _sm_status_color = "#ef4444" if _sm_blocked else "#f59e0b" if _sm_alerts else "#10b981"
+
+            _sm_block_html = ""
+            for _b in _sm_blocks:
+                _sm_block_html += (
+                    f'<div style="background:#1a0000;border:1px solid #ef4444;border-radius:6px;'
+                    f'padding:8px 12px;margin-bottom:6px;">'
+                    f'<span style="color:#f87171;font-weight:600;font-size:0.85em;">🚫 {_b.get("code","")}</span>'
+                    f'<span style="color:#64748b;font-size:0.8em;margin-left:8px;">{_b.get("message","")}</span>'
+                    f'</div>'
+                )
+            _sm_alert_html = ""
+            for _a in _sm_alerts:
+                _sm_alert_html += (
+                    f'<div style="background:#1a1200;border:1px solid #f59e0b;border-radius:6px;'
+                    f'padding:8px 12px;margin-bottom:6px;">'
+                    f'<span style="color:#fbbf24;font-weight:600;font-size:0.85em;">⚠️ {_a.get("code","")}</span>'
+                    f'<span style="color:#64748b;font-size:0.8em;margin-left:8px;">{_a.get("message","")}</span>'
+                    f'</div>'
+                )
+
+            st.markdown(f"""
+<div style="background:#1e293b;border:1px solid {_sm_border};border-radius:10px;padding:16px;margin-bottom:12px;">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="color:#a5b4fc;font-weight:700;font-size:1.05em;">📡 조기 경보 신호 현황</span>
+    <span style="color:{_sm_status_color};font-weight:600;font-size:0.9em;margin-left:12px;">{_sm_status}</span>
+  </div>
+  {"<p style='color:#64748b;font-size:0.82em;margin:0 0 8px;'>실행 차단 규칙</p>" + _sm_block_html if _sm_blocks else ""}
+  {"<p style='color:#64748b;font-size:0.82em;margin:0 0 8px;'>알림 (차단 아님)</p>" + _sm_alert_html if _sm_alerts else ""}
+  {"<p style='color:#10b981;font-size:0.85em;margin:0;'>차단 규칙 없음 · 알림 없음</p>" if not _sm_blocks and not _sm_alerts else ""}
+</div>""", unsafe_allow_html=True)
+
+        # ══ Section 4: 규칙 위반 경보 ════════════════════════════════
+        _gv = orch_result.get("guard_violations", {})
+        _final_v = _gv.get("final", [])
+        _cv_blocked = orch_result.get("puddle_cooldown_blocked", False)
+        _sm_buy_blocked = (_sm.get("buy_blocked", False) if _sm else False)
+        _has_violations = bool(_final_v or _cv_blocked or _sm_buy_blocked)
+        if _has_violations:
+            st.divider()
+            st.markdown("**🛡 규칙 위반 경보**")
+            if _final_v:
+                st.error(f"매뉴얼 가드 발동: {', '.join(_final_v)}")
+            if orch_result.get("final_strategy", {}).get("_guard_corrected"):
+                st.warning("전략이 매뉴얼 규칙에 의해 보정되었습니다 (전 종목 HOLD).")
+            if _cv_blocked:
+                st.info("🕐 동일 PUDDLE 단계 30일 쿨다운 — 매수 차단됨")
+            if _sm_buy_blocked and not _cv_blocked:
+                _block_codes = [r["code"] for r in _sm.get("block_reasons", [])]
+                st.warning(f"조기 경보 매수 차단: {', '.join(_block_codes)}")
+
+        st.divider()
+
         # ── Gemini 이벤트 브리프 + News Snapshot ──
         _gemini_data = orch_result.get("gemini") or {}
         _gem_src = _gemini_data.get("_source", "fallback")
@@ -1879,6 +1995,232 @@ with tab3:
 {_ab_row}
 </div>""", unsafe_allow_html=True)
 
+        # ══ Section 5: 오늘의 시장 digest (news_agent) ════════════════
+        _na = orch_result.get("news_agent") or {}
+        _na_error = _na.get("error", "")
+        if _na_error:
+            _show_agent_error(_na_error)
+        elif _na:
+            _digest = _na.get("digest") or {}
+            _na_ms = _na.get("macro_summary") or {}
+            _na_signals = _digest.get("top_signals") or []
+            _na_summary = _digest.get("one_line_summary", "")
+            _na_macro_bias = _na_ms.get("macro_bias", "neutral")
+            _na_ab = _na_ms.get("asset_bias") or {}
+            _na_cache_tag = " &nbsp;📦 캐시 사용" if _na.get("cache_hit") else ""
+            _na_bias_colors = {"risk_on": "#10b981", "risk_off": "#ef4444", "neutral": "#94a3b8"}
+            _na_bc = _na_bias_colors.get(_na_macro_bias, "#94a3b8")
+
+            # top_signals 렌더
+            _sig_html = ""
+            for _sig in _na_signals[:3]:
+                _sic = {"bullish": "#10b981", "bearish": "#ef4444", "neutral": "#94a3b8"}.get(
+                    _sig.get("impact", "neutral"), "#94a3b8"
+                )
+                _sii = {"bullish": "📈", "bearish": "📉", "neutral": "➡️"}.get(
+                    _sig.get("impact", "neutral"), "➡️"
+                )
+                _sig_html += (
+                    f'<div style="display:flex;gap:10px;align-items:flex-start;'
+                    f'padding:8px 0;border-bottom:1px solid #1e293b;">'
+                    f'<span style="color:#64748b;font-size:0.8em;min-width:18px;">'
+                    f'{_sig.get("rank","")}</span>'
+                    f'<span style="font-size:1.1em;">{_sii}</span>'
+                    f'<div>'
+                    f'<p style="color:{_sic};font-weight:600;margin:0 0 2px;">'
+                    f'{_sig.get("signal","")}</p>'
+                    f'<p style="color:#94a3b8;font-size:0.82em;margin:0;">'
+                    f'{_sig.get("reason","")}</p>'
+                    f'</div></div>'
+                )
+
+            # asset_bias 테이블
+            _ab_html = ""
+            for _ab_a in ["QQQM", "SCHD", "IAU", "SGOV"]:
+                _ab_v = _na_ab.get(_ab_a, 0)
+                _ab_c = "#10b981" if _ab_v > 0 else "#ef4444" if _ab_v < 0 else "#64748b"
+                _ab_ico = "▲" * abs(_ab_v) if _ab_v > 0 else "▼" * abs(_ab_v) if _ab_v < 0 else "—"
+                _ab_html += (
+                    f'<div style="text-align:center;padding:6px 8px;background:#0f172a;'
+                    f'border-radius:6px;">'
+                    f'<p style="color:#94a3b8;font-size:0.75em;margin:0;">{_ab_a}</p>'
+                    f'<p style="color:{_ab_c};font-weight:700;font-size:1em;margin:2px 0;">'
+                    f'{_ab_ico if _ab_ico != "—" else ""}'
+                    f'<span style="margin-left:4px;">{_ab_v:+d}</span></p>'
+                    f'</div>'
+                )
+
+            st.markdown(f"""
+<div style="background:linear-gradient(135deg,#1e293b,#0f172a);
+            border:1px solid #6366f1;border-radius:12px;
+            padding:20px;margin-bottom:16px;">
+  <div style="display:flex;align-items:center;margin-bottom:12px;">
+    <span style="font-size:1.3em;margin-right:8px;">📰</span>
+    <span style="color:#a5b4fc;font-weight:700;font-size:1.1em;">오늘의 시장 digest</span>
+    <span style="color:#475569;font-size:0.78em;margin-left:auto;">{_na_cache_tag}</span>
+  </div>
+  <p style="color:#e2e8f0;font-size:0.95em;margin:0 0 14px;
+            padding:10px;background:#0f172a;border-radius:6px;
+            border-left:3px solid #6366f1;">{_na_summary}</p>
+  <div style="margin-bottom:14px;">{_sig_html}</div>
+  <div style="display:flex;gap:6px;align-items:center;
+              border-top:1px solid #334155;padding-top:10px;">
+    <span style="color:#64748b;font-size:0.8em;margin-right:6px;">매크로 편향</span>
+    <span style="color:{_na_bc};font-weight:700;font-size:0.9em;">{_na_macro_bias}</span>
+    <div style="display:flex;gap:6px;margin-left:auto;">{_ab_html}</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        # ══ Section 6: 신호 충돌 해석 (signal_analyzer) ══════════════
+        st.divider()
+        _sa = orch_result.get("signal_analysis") or {}
+        _sa_cl_error = ((_sa.get("claude_analysis") or {}).get("_error", "") if _sa else "")
+        if _sa_cl_error and _sa.get("conflict_detected"):
+            _show_agent_error(_sa_cl_error)
+        if _sa:
+            _sa_conflict = _sa.get("conflict_detected", False)
+            _sa_type = _sa.get("conflict_type", "")
+            _sa_cache_tag = " &nbsp;📦 캐시 사용" if _sa.get("cache_hit") else ""
+            if not _sa_conflict:
+                st.markdown("""
+<div style="background:#0f2a1e;border:1px solid #10b981;border-radius:10px;
+            padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+  <span style="font-size:1.3em;">🔍</span>
+  <span style="color:#a5b4fc;font-weight:700;font-size:1.05em;">신호 충돌 해석</span>
+  <span style="color:#10b981;font-weight:600;margin-left:8px;">✅ 신호 충돌 없음</span>
+  <span style="color:#475569;font-size:0.78em;margin-left:auto;">일관된 지표 방향</span>
+</div>""", unsafe_allow_html=True)
+            else:
+                _sa_cl = _sa.get("claude_analysis") or {}
+                _sa_consistency = _sa_cl.get("strategy_consistency", "caution")
+                _sa_cons_color = {"consistent": "#10b981", "caution": "#f59e0b", "inconsistent": "#ef4444"}.get(
+                    _sa_consistency, "#f59e0b"
+                )
+                _sa_cons_label = {"consistent": "일관됨", "caution": "주의 필요", "inconsistent": "불일치"}.get(
+                    _sa_consistency, "주의 필요"
+                )
+                _sa_err = (_sa_cl.get("_error") or "")
+                _sa_situation = _sa_cl.get("situation_summary", "")
+                _sa_analogy = _sa_cl.get("historical_analogy", "")
+                _sa_key_risk = _sa_cl.get("key_risk", "")
+                _sa_suggestion = _sa_cl.get("suggestion", "")
+                _sa_conflict_sigs = _sa_cl.get("conflicting_signals") or []
+
+                _sig_list_html = "".join(
+                    f'<li style="color:#fbbf24;font-size:0.85em;">{s}</li>'
+                    for s in _sa_conflict_sigs
+                ) if _sa_conflict_sigs else ""
+
+                st.markdown(f"""
+<div style="background:linear-gradient(135deg,#1e293b,#0f172a);
+            border:1px solid #f59e0b;border-radius:12px;
+            padding:20px;margin-bottom:16px;">
+  <div style="display:flex;align-items:center;margin-bottom:12px;">
+    <span style="font-size:1.3em;margin-right:8px;">🔍</span>
+    <span style="color:#a5b4fc;font-weight:700;font-size:1.1em;">신호 충돌 해석</span>
+    <span style="color:#f59e0b;font-size:0.82em;margin-left:10px;background:#292524;
+                 border-radius:4px;padding:2px 8px;">{_sa_type}</span>
+    <span style="color:{_sa_cons_color};font-weight:700;font-size:0.85em;
+                 margin-left:10px;border:1px solid {_sa_cons_color};
+                 border-radius:4px;padding:2px 8px;">전략 일관성: {_sa_cons_label}</span>
+    <span style="color:#475569;font-size:0.78em;margin-left:auto;">{_sa_cache_tag}</span>
+  </div>
+  {"<p style='color:#f87171;font-size:0.82em;margin:0 0 10px;'>⚠️ API 오류 — fallback 데이터</p>" if _sa_err else ""}
+  <p style="color:#e2e8f0;font-size:0.9em;margin:0 0 10px;
+            padding:10px;background:#0f172a;border-radius:6px;
+            border-left:3px solid #f59e0b;">{_sa_situation}</p>
+  {"<ul style='margin:0 0 10px;padding-left:18px;'>" + _sig_list_html + "</ul>" if _sig_list_html else ""}
+  {"<p style='color:#94a3b8;font-size:0.83em;margin:0 0 6px;'><span style='color:#64748b;'>유사 국면:</span> " + _sa_analogy + "</p>" if _sa_analogy else ""}
+  {"<p style='color:#f87171;font-size:0.83em;margin:0 0 6px;'><span style='color:#64748b;'>핵심 리스크:</span> " + _sa_key_risk + "</p>" if _sa_key_risk else ""}
+  {"<p style='color:#a5b4fc;font-size:0.83em;margin:0 0 10px;'><span style='color:#64748b;'>검토 포인트:</span> " + _sa_suggestion + "</p>" if _sa_suggestion else ""}
+  <p style="color:#475569;font-size:0.75em;margin:10px 0 0;
+            border-top:1px solid #1e293b;padding-top:8px;">
+    ⚠️ 참고용 해석입니다. 최종 결정은 본인이 합니다.
+  </p>
+</div>""", unsafe_allow_html=True)
+
+        # ══ Section 7: o1 교차 검증 (cross_validator) ═════════════════
+        st.divider()
+        _cv = orch_result.get("cross_validation") or {}
+        _cv_vr = _cv.get("validation_result", "")
+        _cv_error = _cv.get("_error", "")
+        if _cv_error and _cv_vr != "not_required":
+            _show_agent_error(_cv_error)
+        if _cv and _cv_vr and _cv_vr != "not_required":
+            _cv_cache_tag = " &nbsp;📦 캐시 사용" if _cv.get("cache_hit") else ""
+            _cv_vr_color = {"agree": "#10b981", "partial": "#f59e0b", "disagree": "#ef4444"}.get(_cv_vr, "#94a3b8")
+            _cv_vr_label = {"agree": "동의", "partial": "부분 동의", "disagree": "이견"}.get(_cv_vr, _cv_vr)
+            _cv_ra = _cv.get("risk_adjustment", "maintain")
+            _cv_ra_icon = {"increase": "🔴", "maintain": "🟡", "decrease": "🟢"}.get(_cv_ra, "🟡")
+            _cv_cs = _cv.get("confidence_score", 0)
+            _cv_qc = _cv.get("quantitative_check") or {}
+            _cv_ta = _cv_qc.get("technical_alignment", "mixed")
+            _cv_ta_color = {"aligned": "#10b981", "mixed": "#f59e0b", "conflicting": "#ef4444"}.get(_cv_ta, "#94a3b8")
+            _cv_violations = _cv.get("rule_violations") or []
+            _cv_divergence = _cv.get("divergence_from_claude", "")
+            _cv_note = _cv.get("final_note", "")
+            _cv_err = _cv.get("_error", "")
+
+            # rule_violations 블록
+            _cv_viol_html = ""
+            if _cv_violations:
+                _cv_viol_html = "<div style='margin:8px 0;'>"
+                for _v in _cv_violations:
+                    _cv_viol_html += (
+                        f'<span style="background:#450a0a;color:#f87171;font-size:0.8em;'
+                        f'border:1px solid #ef4444;border-radius:4px;'
+                        f'padding:2px 8px;margin-right:6px;">⚠️ {_v}</span>'
+                    )
+                _cv_viol_html += "</div>"
+
+            # quantitative_check 블록
+            _cv_qc_rows = ""
+            for _qk, _ql in [
+                ("vix_context", "VIX"),
+                ("yield_curve_context", "금리차"),
+                ("drawdown_context", "낙폭"),
+            ]:
+                _qv = _cv_qc.get(_qk, "")
+                if _qv:
+                    _cv_qc_rows += (
+                        f'<p style="color:#94a3b8;font-size:0.82em;margin:2px 0;">'
+                        f'<span style="color:#64748b;">{_ql}:</span> {_qv}</p>'
+                    )
+
+            st.markdown(f"""
+<div style="background:linear-gradient(135deg,#1e293b,#0f172a);
+            border:1px solid #6366f1;border-radius:12px;
+            padding:20px;margin-bottom:16px;">
+  <div style="display:flex;align-items:center;margin-bottom:12px;">
+    <span style="font-size:1.3em;margin-right:8px;">🤖</span>
+    <span style="color:#a5b4fc;font-weight:700;font-size:1.1em;">교차 검증 (o1)</span>
+    <span style="color:{_cv_vr_color};font-weight:700;font-size:0.88em;
+                 border:1px solid {_cv_vr_color};border-radius:4px;
+                 padding:2px 8px;margin-left:10px;">{_cv_vr_label}</span>
+    <span style="color:#94a3b8;font-size:0.85em;margin-left:10px;">
+      신뢰도 <b style="color:#e2e8f0;">{_cv_cs}</b>/100
+    </span>
+    <span style="margin-left:10px;font-size:1.1em;">{_cv_ra_icon}</span>
+    <span style="color:#64748b;font-size:0.78em;margin-left:4px;">{_cv_ra}</span>
+    <span style="color:#475569;font-size:0.78em;margin-left:auto;">{_cv_cache_tag}</span>
+  </div>
+  {"<p style='color:#f87171;font-size:0.8em;margin:0 0 8px;'>⚠️ API 오류 — fallback 데이터</p>" if _cv_err else ""}
+  {_cv_viol_html}
+  <div style="margin-bottom:10px;">
+    <span style="color:#64748b;font-size:0.8em;">기술적 정렬: </span>
+    <span style="color:{_cv_ta_color};font-weight:600;font-size:0.85em;">{_cv_ta}</span>
+  </div>
+  {_cv_qc_rows}
+  {"<p style='color:#fbbf24;font-size:0.83em;margin:8px 0 4px;'><span style='color:#64748b;'>Claude와의 차이:</span> " + _cv_divergence + "</p>" if _cv_divergence else ""}
+  {"<p style='color:#e2e8f0;font-size:0.9em;margin:10px 0 0;padding:10px;background:#0f172a;border-radius:6px;border-left:3px solid #6366f1;'>" + _cv_note + "</p>" if _cv_note else ""}
+  <p style="color:#475569;font-size:0.75em;margin:10px 0 0;
+            border-top:1px solid #1e293b;padding-top:8px;">
+    ⚠️ 참고용 검증입니다. 최종 결정은 본인이 합니다.
+  </p>
+</div>""", unsafe_allow_html=True)
+
+        # ══ Section 8: 기존 전략 결과 ════════════════════════════════
+        st.divider()
         # ── Claude vs GPT 비교 ──
         _cr = orch_result.get("claude_raw") or {}
         _gr = orch_result.get("gpt_raw") or {}
@@ -1981,15 +2323,32 @@ with tab3:
             </p>
         </div>""", unsafe_allow_html=True)
 
-        # ── Manual Guard 위반 ──
-        _gv = orch_result.get("guard_violations", {})
-        _final_v = _gv.get("final", [])
-        if _final_v:
-            st.error(f"🛡 매뉴얼 가드 발동: {', '.join(_final_v)}")
-        if _final.get("_guard_corrected"):
-            st.warning("전략이 매뉴얼 규칙에 의해 보정되었습니다 (전 종목 HOLD).")
-        if orch_result.get("puddle_cooldown_blocked"):
-            st.info("🕐 동일 PUDDLE 단계 30일 쿨다운 — 매수 차단됨")
+        # ── 사이드바 캐시 상태 ──────────────────────────────────────
+        with st.sidebar:
+            st.markdown("---")
+            st.markdown("### 📦 캐시 상태")
+            _cache_na_hit = "🟢 사용" if (_na or {}).get("cache_hit") else "⚪ 미사용"
+            _cache_sa_hit = "🟢 사용" if (_sa or {}).get("cache_hit") else "⚪ 미사용"
+            _cache_cv_hit = "🟢 사용" if (_cv or {}).get("cache_hit") else "⚪ 미사용"
+            st.caption(f"News Agent: {_cache_na_hit}")
+            st.caption(f"Signal Analyzer: {_cache_sa_hit}")
+            st.caption(f"Cross Validator: {_cache_cv_hit}")
+            try:
+                from pathlib import Path as _Path
+                _cache_count = len(list((_Path("fire25") / "cache").glob("*.json")))
+                st.caption(f"캐시 파일 수: {_cache_count}개")
+            except Exception:
+                st.caption("캐시 파일 수: —")
+            if st.button("🗑 캐시 초기화", key="clear_cache_btn"):
+                try:
+                    import shutil as _shutil
+                    from pathlib import Path as _P2
+                    _c_dir = _P2("fire25") / "cache"
+                    for _cf in _c_dir.glob("*.json"):
+                        _cf.unlink(missing_ok=True)
+                    st.success("캐시 초기화 완료")
+                except Exception as _ce:
+                    st.error(f"초기화 실패: {_ce}")
 
         # ── AI 상태 진단 ──
         def _status_dot(src, err):

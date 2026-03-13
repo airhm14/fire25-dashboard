@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -35,6 +36,9 @@ from fire25.strategy_v2.manual_guard import (
 )
 from fire25.engine.puddle_sizing import compute_puddle_sizing
 from fire25.engine.signal_monitor import evaluate_signals
+from fire25.agents.news_agent import run as news_agent_run
+from fire25.agents.signal_analyzer import analyze as signal_analyzer_analyze
+from fire25.agents.cross_validator import validate as cross_validator_validate
 from fire25.strategy_v2.execution_plan import build_plan
 from fire25.agents import gemini_agent, claude_agent, gpt_agent
 from fire25.ai.decision_context_builder import (
@@ -163,6 +167,9 @@ def run(
         "news_snapshot": None,
         "macro_events": [],
         "macro_summary": {},
+        "news_agent": {},
+        "signal_analysis": {},
+        "cross_validation": {},
     }
 
     # ── Step 1: Regime Gate (with persistence filter) ────────────
@@ -367,6 +374,71 @@ def run(
     if gemini_result.get("_source") == "gemini":
         _news_for_strategy = gemini_result.get("headline_summary", "") or news_summary
 
+    # ── Step 6b: News Agent → digest 생성 ────────────────────────
+    _news_agent_items = _to_news_agent_items(_articles)
+    if _news_agent_items:
+        try:
+            _news_agent_result = news_agent_run(
+                _news_agent_items,
+                api_key=gemini_api_key,
+            )
+            result["news_agent"] = _news_agent_result
+        except Exception:
+            result["news_agent"] = {}
+
+    # ── Step 6c: Signal Conflict Analyzer ────────────────────────
+    _na = result["news_agent"]
+    _na_macro = _na.get("macro_summary") or {}
+    _na_asset_bias = _na_macro.get("asset_bias") or {}
+    _sa_payload = {
+        "regime": regime,
+        "puddle_stage": regime_result.puddle_stage,
+        "signals": {
+            "technical": {
+                "vix": vix,
+                "qqqm_vs_ma50": "above" if qqqm_price >= qqqm_ma50 else "below",
+                "qqqm_vs_ma200": "above" if qqqm_price >= qqqm_ma200 else "below",
+            },
+            "macro": {
+                "macro_bias": _macro_summary.get("macro_bias", "neutral"),
+            },
+            "news": {
+                "macro_bias": _na_macro.get("macro_bias", "neutral"),
+                "asset_bias_qqqm": int(_na_asset_bias.get("QQQM", 0)),
+                "one_line_summary": (_na.get("digest") or {}).get("one_line_summary", ""),
+            },
+        },
+        "active_blocks": [r["code"] for r in _signal_result.get("block_reasons", [])],
+        "active_alerts": [a["code"] for a in _signal_result.get("alerts", [])],
+    }
+    try:
+        result["signal_analysis"] = signal_analyzer_analyze(
+            _sa_payload,
+            api_key=claude_api_key,
+        )
+    except Exception:
+        result["signal_analysis"] = {}
+
+    # ── Step 6d: Cross Validator (o1 교차 검증) ──────────────────
+    _sa_result = result["signal_analysis"]
+    _cv_conflict = bool(_sa_result.get("conflict_detected", False))
+    _cv_payload = {
+        "regime": regime,
+        "signals": _sa_payload.get("signals", {}),
+        "puddle_sizing": result["puddle_sizing"] or None,
+        "active_blocks": _sa_payload.get("active_blocks", []),
+        "active_alerts": _sa_payload.get("active_alerts", []),
+        "claude_analysis": (_sa_result.get("claude_analysis") or {}),
+    }
+    try:
+        result["cross_validation"] = cross_validator_validate(
+            _cv_payload,
+            conflict_detected=_cv_conflict,
+            api_key=openai_api_key,
+        )
+    except Exception:
+        result["cross_validation"] = {}
+
     # ── Step 7: Claude + GPT independent strategies ──────────────
     claude_result = claude_agent.run(
         regime=regime,
@@ -491,6 +563,31 @@ def _force_hold_buys(strategy: dict) -> None:
         if str(act.get("action", "")).upper() == "BUY":
             act["action"] = "HOLD"
             act["amount"] = 0
+
+
+def _to_news_agent_items(articles: list[dict]) -> list[dict]:
+    """orchestrator 기사 포맷 → news_agent 입력 포맷 변환.
+
+    news_engine 포맷 (title/source/published/summary/link) →
+    news_agent 포맷 (id/title/source/date/content).
+    """
+    items: list[dict] = []
+    for a in articles:
+        title = (a.get("title") or "").strip()
+        if not title:
+            continue
+        _link = a.get("link") or ""
+        _id = _link or hashlib.sha256(title.encode("utf-8")).hexdigest()[:12]
+        _date = (a.get("published") or "")[:10]  # YYYY-MM-DD
+        _content = a.get("summary") or a.get("content") or ""
+        items.append({
+            "id": _id,
+            "title": title,
+            "source": a.get("source") or "",
+            "date": _date,
+            "content": _content,
+        })
+    return items
 
 
 def _default_portfolio() -> dict:

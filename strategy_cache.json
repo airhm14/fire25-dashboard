@@ -1,0 +1,43 @@
+{
+  "84aea0f85ea486c6": {
+    "strategy": {
+      "regime": "NORMAL",
+      "market_view": "전략 생성에 실패했습니다.",
+      "strategy_reason": "",
+      "risk_level": "MODERATE",
+      "recommended_actions": [
+        {
+          "ticker": "QQQM",
+          "action": "HOLD",
+          "amount": 0
+        },
+        {
+          "ticker": "SCHD",
+          "action": "HOLD",
+          "amount": 0
+        },
+        {
+          "ticker": "IAU",
+          "action": "HOLD",
+          "amount": 0
+        },
+        {
+          "ticker": "SGOV",
+          "action": "HOLD",
+          "amount": 0
+        }
+      ],
+      "cash_action": "KEEP",
+      "confidence_score": 0,
+      "reason_codes": [
+        "FALLBACK"
+      ],
+      "_source": "consensus",
+      "_debug_error": "missing_api_key",
+      "_agent": "claude",
+      "_puddle_cooldown_note": "동일 PUDDLE 단계 30일 쿨다운 → 매수 차단"
+    },
+    "timestamp": "2026-03-13 21:41:45",
+    "context_regime": "PUDDLE_2"
+  }
+}

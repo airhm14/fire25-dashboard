@@ -2312,13 +2312,28 @@ with tab3:
             return "🟡", "fallback"
 
         _gem_dot, _gem_msg = _status_dot(_gemini_data.get("_source"), _gemini_data.get("_debug_error"))
+
         _sa_data = orch_result.get("signal_analysis") or {}
         _sa_err = (_sa_data.get("claude_analysis") or {}).get("_error", "")
-        _sa_dot, _sa_msg = _status_dot("ok" if _sa_data else None, _sa_err)
+        # 에러가 있으면 src를 None으로 — 오류가 🟢로 가려지는 버그 수정
+        _sa_dot, _sa_msg = _status_dot("ok" if _sa_data and not _sa_err else None, _sa_err)
+
+        _cv_data = orch_result.get("cross_validation") or {}
+        _cv_diag_err = _cv_data.get("_error", "")
+        _cv_diag_vr = _cv_data.get("validation_result", "")
+        if _cv_diag_vr == "not_required":
+            _cv_dot, _cv_msg = "⚪", "not_required (신호 충돌 없음 — API 미호출)"
+        else:
+            _cv_dot, _cv_msg = _status_dot(
+                "ok" if _cv_data and not _cv_diag_err else None,
+                _cv_diag_err,
+            )
+
         with st.expander("🔍 AI 상태 진단", expanded=False):
             st.markdown(f"{_gem_dot} **Gemini** (`{_gem_model}`) — {_gem_msg}")
             st.markdown(f"{_sa_dot} **Signal Analyzer** (Claude) — {_sa_msg}")
-            st.caption("🟢 정상 | 🟡 fallback (키 없음/SDK 없음) | 🔴 오류")
+            st.markdown(f"{_cv_dot} **Cross Validator** (o1) — {_cv_msg}")
+            st.caption("🟢 정상 | 🟡 fallback (키 없음/SDK 없음) | 🔴 오류 | ⚪ 미실행")
             st.markdown("---")
             st.markdown("**📋 일관성 메타데이터**")
             st.markdown(f"- **strategy_hash**: `{orch_result.get('strategy_hash', '—')}`")

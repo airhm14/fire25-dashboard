@@ -304,14 +304,7 @@ def _parse_json_response(text: str) -> dict | None:
     if not raw:
         return None
 
-    # code block 제거
-    m = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw, re.IGNORECASE)
-    if m:
-        raw = (m.group(1) or "").strip()
-
-    raw = _clean_json_text(raw)
-
-    # 전체 파싱 시도
+    # 1단계: 클리닝 없이 직접 파싱 (response_mime_type=application/json 대응)
     try:
         obj = json.loads(raw)
         if isinstance(obj, dict):
@@ -319,7 +312,21 @@ def _parse_json_response(text: str) -> dict | None:
     except Exception:
         pass
 
-    # { ... } 블록 찾기
+    # 2단계: code block 제거 후 재시도
+    m = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw, re.IGNORECASE)
+    if m:
+        raw = (m.group(1) or "").strip()
+
+    raw = _clean_json_text(raw)
+
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+
+    # 3단계: { ... } 블록 찾기
     m2 = re.search(r"\{[\s\S]*\}", raw)
     if m2:
         try:

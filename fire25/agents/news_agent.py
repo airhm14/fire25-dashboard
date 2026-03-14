@@ -248,8 +248,11 @@ def _call_gemini(
             contents=user_prompt,
             config=cfg,
         )
-        # 응답 텍스트 추출 (thinking 모델 대응)
-        text = _extract_text(resp)
+        # resp.text: SDK가 parts를 자동 합산한 전체 텍스트
+        try:
+            text = resp.text or ""
+        except Exception:
+            text = _extract_text(resp)
         if not text or not text.strip():
             return "", "empty_response"
         return text, None
@@ -492,7 +495,7 @@ def run(
         parsed = _parse_json_response(text)
         if parsed is not None:
             break
-        last_error = f"parse_error_attempt_{attempt + 1}|{(text or '')[:300]}"
+        last_error = f"parse_error_attempt_{attempt + 1}|{(text or '')[:800]}"
 
     if parsed is None:
         return {

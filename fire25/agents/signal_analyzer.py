@@ -243,11 +243,11 @@ def _call_claude(
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
             model=model,
-            max_tokens=1000,
+            max_tokens=4096,
             temperature=0,
             system=_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
-            timeout=30.0,
+            timeout=60.0,
         )
         text = msg.content[0].text or ""
         if not text.strip():
@@ -268,13 +268,21 @@ def _parse_json_response(text: str) -> dict | None:
     if not raw:
         return None
 
-    # code block 제거
+    # 1단계: 클리닝 없이 직접 파싱
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+
+    # 2단계: code block 제거 후 재시도
     m = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw, re.IGNORECASE)
     if m:
         raw = (m.group(1) or "").strip()
 
-    # trailing comma 제거
     raw = re.sub(r",\s*([}\]])", r"\1", raw)
+    raw = re.sub(r":\s*\+(\d)", r": \1", raw)
     raw = raw.replace("\u201c", '"').replace("\u201d", '"')
 
     try:

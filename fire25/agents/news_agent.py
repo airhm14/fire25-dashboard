@@ -258,26 +258,18 @@ def _call_gemini(
 
 
 def _extract_text(response: Any) -> str:
-    """google-genai 응답에서 텍스트 추출 (thinking 모델 대응)."""
+    """google-genai 응답에서 텍스트 추출 (thinking 모델 대응, multi-part 합산)."""
     try:
         parts = response.candidates[0].content.parts
         output_parts = []
-        all_texts = []
         for part in parts:
             t = getattr(part, "text", None) or ""
             is_thought = getattr(part, "thought", None)
-            all_texts.append(t)
-            if not is_thought:
+            if not is_thought and t:
                 output_parts.append(t)
-        for t in output_parts:
-            if "{" in t or "[" in t:
-                return t
-        for t in reversed(output_parts):
-            if t.strip():
-                return t
-        for t in all_texts:
-            if "{" in t or "[" in t:
-                return t
+        combined = "".join(output_parts)
+        if combined.strip():
+            return combined
     except Exception:
         pass
     return getattr(response, "text", "") or ""

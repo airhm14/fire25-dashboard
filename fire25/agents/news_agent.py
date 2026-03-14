@@ -239,8 +239,9 @@ def _call_gemini(
             system_instruction=_SYSTEM_PROMPT,
             temperature=0,
             top_p=1,
-            max_output_tokens=4096,
+            max_output_tokens=8192,
             thinking_config=types.ThinkingConfig(thinking_budget=0),
+            response_mime_type="application/json",
         )
         resp = client.models.generate_content(
             model=model,
@@ -499,7 +500,7 @@ def run(
         parsed = _parse_json_response(text)
         if parsed is not None:
             break
-        last_error = f"parse_error_attempt_{attempt + 1}|{(text or '')[:120]}"
+        last_error = f"parse_error_attempt_{attempt + 1}|{(text or '')[:300]}"
 
     if parsed is None:
         return {

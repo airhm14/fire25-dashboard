@@ -1917,21 +1917,36 @@ with tab3:
             _sm_status = "🚫 매수 차단" if _sm_blocked else ("⚠️ 알림 있음" if _sm_alerts else "✅ 정상")
             _sm_status_color = "#ef4444" if _sm_blocked else "#f59e0b" if _sm_alerts else "#10b981"
 
+            _SIGNAL_LABELS: dict = {
+                "VIX_SPIKE": "변동성 급등",
+                "QQQM_MA50_BREAK": "단기 추세선 이탈",
+                "QQQM_CAP_VIOLATION": "QQQM 비중 한도 초과",
+                "DUPLICATE_PUDDLE_BUY": "동일 단계 중복 매수 시도",
+                "COOLDOWN_VIOLATION": "쿨다운 기간 위반",
+                "YIELD_CURVE_STRESS": "장단기 금리차 이상",
+                "SGOV_CAP_WARNING": "SGOV 비중 한도 근접",
+            }
             _sm_block_html = ""
             for _b in _sm_blocks:
+                _b_code = _b.get("code", "")
+                _b_label = _SIGNAL_LABELS.get(_b_code, _b_code)
                 _sm_block_html += (
                     f'<div style="background:#1a0000;border:1px solid #ef4444;border-radius:6px;'
                     f'padding:8px 12px;margin-bottom:6px;">'
-                    f'<span style="color:#f87171;font-weight:600;font-size:0.85em;">🚫 {_b.get("code","")}</span>'
+                    f'<span style="color:#f87171;font-weight:600;font-size:0.85em;">🚫 {_b_label}</span>'
+                    f'<span style="color:#64748b;font-size:0.75em;margin-left:8px;">({_b_code})</span>'
                     f'<span style="color:#64748b;font-size:0.8em;margin-left:8px;">{_b.get("message","")}</span>'
                     f'</div>'
                 )
             _sm_alert_html = ""
             for _a in _sm_alerts:
+                _a_code = _a.get("code", "")
+                _a_label = _SIGNAL_LABELS.get(_a_code, _a_code)
                 _sm_alert_html += (
                     f'<div style="background:#1a1200;border:1px solid #f59e0b;border-radius:6px;'
                     f'padding:8px 12px;margin-bottom:6px;">'
-                    f'<span style="color:#fbbf24;font-weight:600;font-size:0.85em;">⚠️ {_a.get("code","")}</span>'
+                    f'<span style="color:#fbbf24;font-weight:600;font-size:0.85em;">⚠️ {_a_label}</span>'
+                    f'<span style="color:#64748b;font-size:0.75em;margin-left:8px;">({_a_code})</span>'
                     f'<span style="color:#64748b;font-size:0.8em;margin-left:8px;">{_a.get("message","")}</span>'
                     f'</div>'
                 )
@@ -1964,7 +1979,10 @@ with tab3:
                 st.info("🕐 동일 PUDDLE 단계 30일 쿨다운 — 매수 차단됨")
             if _sm_buy_blocked and not _cv_blocked:
                 _block_codes = [r["code"] for r in _sm.get("block_reasons", [])]
-                st.warning(f"조기 경보 매수 차단: {', '.join(_block_codes)}")
+                _block_labels = [
+                    f"{_SIGNAL_LABELS.get(c, c)} ({c})" for c in _block_codes
+                ]
+                st.warning(f"조기 경보 매수 차단: {', '.join(_block_labels)}")
 
         st.divider()
 

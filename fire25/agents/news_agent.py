@@ -240,6 +240,7 @@ def _call_gemini(
             temperature=0,
             top_p=1,
             max_output_tokens=4096,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         )
         resp = client.models.generate_content(
             model=model,

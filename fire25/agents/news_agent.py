@@ -248,7 +248,14 @@ def _call_gemini(
             contents=user_prompt,
             config=cfg,
         )
-        # resp.text: SDK가 parts를 자동 합산한 전체 텍스트
+        # response_mime_type=application/json → resp.parsed가 이미 dict
+        try:
+            parsed_direct = getattr(resp, "parsed", None)
+            if isinstance(parsed_direct, dict):
+                return json.dumps(parsed_direct, ensure_ascii=False), None
+        except Exception:
+            pass
+        # fallback: resp.text → _extract_text
         try:
             text = resp.text or ""
         except Exception:

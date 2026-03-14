@@ -6,8 +6,8 @@
 캐시: 파일 기반 (fire25/cache/news_snapshot_{hash}.json)
 
 SDK: google-genai (기존 gemini_agent.py와 동일 — google-generativeai 아님)
-모델: gemini-2.5-flash (model_registry 기준 — gemini_events.py와 통일)
-온도: 0 (deterministic), thinking_budget=0 (thinking 출력 비활성화)
+모델: gemini-1.5-flash (비용 효율)
+온도: 0 (deterministic)
 
 파싱 실패 시 1회 재시도, 그 후 fallback 반환.
 severity 1~5, asset_bias -2~+2 범위 강제 클리핑.
@@ -37,7 +37,7 @@ def _load_api_key(key_name: str) -> str:
     return os.environ.get(key_name, "")
 
 # ── 상수 ─────────────────────────────────────────────────────────
-_MODEL_DEFAULT: str = "gemini-2.5-flash"
+_MODEL_DEFAULT: str = "gemini-1.5-flash"
 _CACHE_DIR: Path = Path(__file__).parent.parent / "cache"
 _ASSETS: list[str] = ["QQQM", "SCHD", "IAU", "SGOV"]
 
@@ -220,7 +220,7 @@ def _call_gemini(
     Args:
         user_prompt: 뉴스 + 스키마 포함 user prompt.
         api_key: Gemini API 키.
-        model: 모델명 (예: gemini-2.5-flash).
+        model: 모델명 (예: gemini-1.5-flash).
 
     Returns:
         (응답 텍스트, 오류 코드) — 정상 시 오류 코드 None.
@@ -238,7 +238,6 @@ def _call_gemini(
             temperature=0,
             top_p=1,
             max_output_tokens=4096,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
         )
         resp = client.models.generate_content(
             model=model,
@@ -438,7 +437,7 @@ def run(
     Args:
         news_items: 뉴스 항목 목록. 각 항목: {id, title, source, date, content}.
         api_key: Gemini API 키. 미입력 시 환경변수 GEMINI_API_KEY 사용.
-        model: Gemini 모델명. 기본값 gemini-2.5-flash.
+        model: Gemini 모델명. 기본값 gemini-1.5-flash.
 
     Returns:
         dict:

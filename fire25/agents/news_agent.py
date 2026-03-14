@@ -316,16 +316,6 @@ def _parse_json_response(text: str) -> dict | None:
         obj = json.loads(raw)
         if isinstance(obj, dict):
             return obj
-    except json.JSONDecodeError as _je:
-        # 디버그: 전체 응답을 파일로 저장
-        try:
-            _dbg = _CACHE_DIR / "news_agent_debug.txt"
-            _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            with _dbg.open("w", encoding="utf-8") as _f:
-                _f.write(f"JSONDecodeError: {_je.msg} at pos {_je.pos} (line {_je.lineno} col {_je.colno})\n\n")
-                _f.write(raw)
-        except Exception:
-            pass
     except Exception:
         pass
 
@@ -519,7 +509,15 @@ def run(
         parsed = _parse_json_response(text)
         if parsed is not None:
             break
-        last_error = f"parse_error_attempt_{attempt + 1}|{(text or '')[:800]}"
+        _txt = text or ""
+        _json_err = ""
+        try:
+            json.loads(_txt.strip())
+        except json.JSONDecodeError as _je:
+            _json_err = f" | JSONErr pos={_je.pos} line={_je.lineno} col={_je.colno}: {_je.msg}"
+        except Exception as _e:
+            _json_err = f" | Err:{type(_e).__name__}:{_e}"
+        last_error = f"parse_error_attempt_{attempt + 1} | len={len(_txt)}{_json_err} | {_txt[:400]}"
 
     if parsed is None:
         return {

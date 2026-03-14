@@ -54,6 +54,7 @@ _prev_strategy: dict[str, Any] | None = None
 _prev_hash: str = ""
 _prev_puddle_stage: int = 0
 _prev_smart_shoulder: bool = False
+_prev_display: dict[str, Any] = {}  # regime lock 시 복원용 display 데이터
 
 
 def _regime_lock_exception(
@@ -293,6 +294,10 @@ def run(
             )
             result["final_strategy"] = final
             result["api_calls"] = 0
+            # 이전 display 데이터 복원 (gemini, news_agent 등)
+            for _k, _v in _prev_display.items():
+                if _v:
+                    result[_k] = _v
             return result
         else:
             result["regime_lock_exception"] = lock_exception
@@ -511,6 +516,10 @@ def run(
     _prev_hash = strategy_hash
     _prev_puddle_stage = puddle_stage
     _prev_smart_shoulder = smart_shoulder_triggered
+    _prev_display.clear()
+    for _k in ("gemini", "news_agent", "news_snapshot", "signal_analysis", "cross_validation"):
+        if result.get(_k):
+            _prev_display[_k] = result[_k]
 
     result["final_strategy"] = final
     result["api_calls"] = api_calls

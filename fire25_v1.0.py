@@ -1736,7 +1736,10 @@ with tab3:
         _gemini_key = _get_key("GEMINI_API_KEY")
         _claude_key = _get_key("ANTHROPIC_API_KEY")
         _openai_key = _get_key("OPENAI_API_KEY")
-        _models_cfg = dict(st.secrets.get("models", {}))
+        try:
+            _models_cfg = dict(st.secrets["models"])
+        except Exception:
+            _models_cfg = {}
 
         from fire25.engine.orchestrator import run as orchestrator_run
         from fire25.strategy_v2.portfolio_strategy import build_portfolio_input
@@ -1853,18 +1856,23 @@ with tab3:
         </div>""", unsafe_allow_html=True)
 
         # ── 에러 표시 헬퍼 ──────────────────────────────────────────
-        def _show_agent_error(error: str) -> bool:
+        def _show_agent_error(error: str, agent_name: str = "") -> bool:
             """에러 문자열 → 통합 경고 표시. 에러가 있으면 True 반환."""
             if not error:
                 return False
+            _prefix = f"[{agent_name}] " if agent_name else ""
             if "missing_api_key" in error:
-                st.warning("🔑 API key가 설정되지 않았습니다")
+                st.warning(f"🔑 {_prefix}API key가 설정되지 않았습니다")
             elif "parse_error" in error:
-                st.warning("⚠️ 응답 파싱 실패 — 재시도 후에도 실패")
+                st.warning(f"⚠️ {_prefix}응답 파싱 실패 — 재시도 후에도 실패")
             elif "api_error" in error:
-                st.error("🔴 API 호출 실패")
+                # "api_error:ExceptionType:message" → ExceptionType 추출
+                _parts = error.split(":", 2)
+                _etype = _parts[1].strip() if len(_parts) > 1 else ""
+                _detail = f" ({_etype})" if _etype else ""
+                st.warning(f"⚠️ {_prefix}API 호출 실패{_detail} — API 키 또는 모델 접근 권한을 확인하세요")
             else:
-                st.warning(f"⚠️ {error}")
+                st.warning(f"⚠️ {_prefix}{error}")
             return True
 
         # ══ Section 2: PUDDLE 동적 비중 ══════════════════════════════
@@ -2006,9 +2014,9 @@ with tab3:
 
         # ══ Section 5: 오늘의 시장 digest (news_agent) ════════════════
         _na = orch_result.get("news_agent") or {}
-        _na_error = _na.get("error", "")
+        _na_error = str(_na.get("error") or "")
         if _na_error:
-            _show_agent_error(_na_error)
+            _show_agent_error(_na_error, "News Agent")
         elif _na:
             _digest = _na.get("digest") or {}
             _na_ms = _na.get("macro_summary") or {}
@@ -2085,7 +2093,7 @@ with tab3:
         _sa = orch_result.get("signal_analysis") or {}
         _sa_cl_error = ((_sa.get("claude_analysis") or {}).get("_error", "") if _sa else "")
         if _sa_cl_error and _sa.get("conflict_detected"):
-            _show_agent_error(_sa_cl_error)
+            _show_agent_error(_sa_cl_error, "Signal Analyzer")
         if _sa:
             _sa_conflict = _sa.get("conflict_detected", False)
             _sa_type = _sa.get("conflict_type", "")
@@ -2154,7 +2162,7 @@ with tab3:
         _cv_vr = _cv.get("validation_result", "")
         _cv_error = _cv.get("_error", "")
         if _cv_error and _cv_vr != "not_required":
-            _show_agent_error(_cv_error)
+            _show_agent_error(_cv_error, "Cross Validator")
         if _cv and _cv_vr and _cv_vr != "not_required":
             _cv_cache_tag = " &nbsp;📦 캐시 사용" if _cv.get("cache_hit") else ""
             _cv_vr_color = {"agree": "#10b981", "partial": "#f59e0b", "disagree": "#ef4444"}.get(_cv_vr, "#94a3b8")

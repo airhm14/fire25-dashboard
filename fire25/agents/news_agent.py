@@ -316,6 +316,16 @@ def _parse_json_response(text: str) -> dict | None:
         obj = json.loads(raw)
         if isinstance(obj, dict):
             return obj
+    except json.JSONDecodeError as _je:
+        # 디버그: 전체 응답을 파일로 저장
+        try:
+            _dbg = _CACHE_DIR / "news_agent_debug.txt"
+            _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            with _dbg.open("w", encoding="utf-8") as _f:
+                _f.write(f"JSONDecodeError: {_je.msg} at pos {_je.pos} (line {_je.lineno} col {_je.colno})\n\n")
+                _f.write(raw)
+        except Exception:
+            pass
     except Exception:
         pass
 

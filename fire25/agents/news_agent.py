@@ -84,10 +84,10 @@ _OUTPUT_SCHEMA: dict = {
         "macro_bias": "risk_on|risk_off|neutral",
         "risk_sentiment": "전반적 시장 심리 한국어 1문장",
         "asset_bias": {
-            "QQQM": "-2~+2 정수 (-2:강매도, -1:약매도, 0:중립, +1:약매수, +2:강매수)",
-            "SCHD": "-2~+2 정수",
-            "IAU": "-2~+2 정수",
-            "SGOV": "-2~+2 정수",
+            "QQQM": "-2에서 2 사이 정수 (-2:강매도, -1:약매도, 0:중립, 1:약매수, 2:강매수)",
+            "SCHD": "-2에서 2 사이 정수",
+            "IAU": "-2에서 2 사이 정수",
+            "SGOV": "-2에서 2 사이 정수",
         },
     },
     "digest": {
@@ -292,7 +292,8 @@ def _clean_json_text(raw: str) -> str:
     s = raw.replace("\u201c", '"').replace("\u201d", '"')
     s = s.replace("\u2018", "'").replace("\u2019", "'")
     s = s.replace("\ufeff", "").replace("\u200b", "")
-    s = re.sub(r",\s*([}\]])", r"\1", s)   # trailing comma 제거
+    s = re.sub(r",\s*([}\]])", r"\1", s)    # trailing comma 제거
+    s = re.sub(r":\s*\+(\d)", r": \1", s)  # +1 → 1 (JSON은 + 부호 숫자 불허)
     s = re.sub(r":\s*,", ": null,", s)      # 빈 값 "key": , → "key": null,
     s = re.sub(r",(\s*,)+", ",", s)         # 이중 콤마 ,, → ,
     return s.strip()

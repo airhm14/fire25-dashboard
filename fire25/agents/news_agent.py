@@ -24,6 +24,8 @@ from typing import Any
 
 import streamlit as st
 
+from fire25.ai.model_registry import get_model_name
+
 
 def _load_api_key(key_name: str) -> str:
     # 1순위: st.secrets
@@ -37,7 +39,7 @@ def _load_api_key(key_name: str) -> str:
     return os.environ.get(key_name, "")
 
 # ── 상수 ─────────────────────────────────────────────────────────
-_MODEL_DEFAULT: str = "gemini-1.5-flash"
+_MODEL_DEFAULT: str = get_model_name("gemini")
 _CACHE_DIR: Path = Path(__file__).parent.parent / "cache"
 _ASSETS: list[str] = ["QQQM", "SCHD", "IAU", "SGOV"]
 

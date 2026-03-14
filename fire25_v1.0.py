@@ -2134,13 +2134,6 @@ with tab3:
                 _sa_analogy = _sa_cl.get("historical_analogy", "")
                 _sa_key_risk = _sa_cl.get("key_risk", "")
                 _sa_suggestion = _sa_cl.get("suggestion", "")
-                _sa_conflict_sigs = _sa_cl.get("conflicting_signals") or []
-
-                _sig_list_html = "".join(
-                    f'<li style="color:#fbbf24;font-size:0.85em;">{s}</li>'
-                    for s in _sa_conflict_sigs
-                ) if _sa_conflict_sigs else ""
-
                 st.markdown(f"""
 <div style="background:linear-gradient(135deg,#1e293b,#0f172a);
             border:1px solid #f59e0b;border-radius:12px;
@@ -2159,7 +2152,6 @@ with tab3:
   <p style="color:#e2e8f0;font-size:0.9em;margin:0 0 10px;
             padding:10px;background:#0f172a;border-radius:6px;
             border-left:3px solid #f59e0b;">{_sa_situation}</p>
-  {"<ul style='margin:0 0 10px;padding-left:18px;'>" + _sig_list_html + "</ul>" if _sig_list_html else ""}
   {"<p style='color:#94a3b8;font-size:0.83em;margin:0 0 6px;'><span style='color:#64748b;'>유사 국면:</span> " + _sa_analogy + "</p>" if _sa_analogy else ""}
   {"<p style='color:#f87171;font-size:0.83em;margin:0 0 6px;'><span style='color:#64748b;'>핵심 리스크:</span> " + _sa_key_risk + "</p>" if _sa_key_risk else ""}
   {"<p style='color:#a5b4fc;font-size:0.83em;margin:0 0 10px;'><span style='color:#64748b;'>검토 포인트:</span> " + _sa_suggestion + "</p>" if _sa_suggestion else ""}

@@ -291,8 +291,10 @@ def _clean_json_text(raw: str) -> str:
     """Gemini 출력 공통 클리닝."""
     s = raw.replace("\u201c", '"').replace("\u201d", '"')
     s = s.replace("\u2018", "'").replace("\u2019", "'")
-    s = re.sub(r",\s*([}\]])", r"\1", s)  # trailing comma 제거
     s = s.replace("\ufeff", "").replace("\u200b", "")
+    s = re.sub(r",\s*([}\]])", r"\1", s)   # trailing comma 제거
+    s = re.sub(r":\s*,", ": null,", s)      # 빈 값 "key": , → "key": null,
+    s = re.sub(r",(\s*,)+", ",", s)         # 이중 콤마 ,, → ,
     return s.strip()
 
 

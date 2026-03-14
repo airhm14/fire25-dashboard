@@ -1859,7 +1859,7 @@ with tab3:
                 st.warning(f"⚠️ {_prefix}응답 파싱 실패 — 재시도 후에도 실패")
                 _preview = error.split("|", 1)[1] if "|" in error else ""
                 if _preview:
-                    st.text(_preview[:2000])
+                    st.caption(f"응답 미리보기: `{_preview[:200]}`")
             elif "api_error" in error:
                 # "api_error:ExceptionType:message" → ExceptionType 추출
                 _parts = error.split(":", 2)

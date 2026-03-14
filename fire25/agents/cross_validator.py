@@ -37,7 +37,7 @@ def _load_api_key(key_name: str) -> str:
 _MODEL_PRIMARY: str = "o1"
 _MODEL_FALLBACK: str = "gpt-4o"
 _CACHE_DIR: Path = Path(__file__).parent.parent / "cache"
-_MAX_COMPLETION_TOKENS: int = 1000
+_MAX_COMPLETION_TOKENS: int = 4096
 
 # QQQM 80% 상한 위반 감지용 패턴
 _QQQM_CAP_PATTERN: re.Pattern = re.compile(
@@ -401,8 +401,8 @@ def validate(
     prompt = _build_prompt(payload)
     text, err = _call_o1(prompt, _api_key, _model)
 
-    if err and _model != _MODEL_FALLBACK:
-        # primary(o1) 실패 → fallback 모델 재시도
+    if (err or not text) and _model != _MODEL_FALLBACK:
+        # primary(o1) 실패 또는 빈 응답 → fallback 모델 재시도
         text, err = _call_o1(prompt, _api_key, _MODEL_FALLBACK)
 
     if err or not text:

@@ -513,13 +513,16 @@ def run(
             break
         _txt = text or ""
         _json_err = ""
+        _ctx = ""
         try:
             json.loads(_txt.strip())
         except json.JSONDecodeError as _je:
             _json_err = f" | JSONErr pos={_je.pos} line={_je.lineno} col={_je.colno}: {_je.msg}"
+            _p = _je.pos
+            _ctx = f" | CONTEXT[{_p-60}:{_p+60}]: {repr(_txt[max(0,_p-60):_p+60])}"
         except Exception as _e:
             _json_err = f" | Err:{type(_e).__name__}:{_e}"
-        last_error = f"parse_error_attempt_{attempt + 1} | len={len(_txt)}{_json_err} | {_txt[:400]}"
+        last_error = f"parse_error_attempt_{attempt + 1} | len={len(_txt)}{_json_err}{_ctx}"
 
     if parsed is None:
         return {

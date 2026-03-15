@@ -1779,6 +1779,15 @@ with tab3:
                 smart_shoulder_triggered=smart_shoulder_triggered,
                 market_regime=str(regime_info.get("regime", "CORRECTION")),
                 market_confidence=float(regime_info.get("confidence", 0.5)),
+                # ── 실제 시장 지표값 (yfinance 기반) ─────────────────────
+                vix=_safe_float((vix_data or {}).get("price"), 20.0),
+                qqqm_price=_safe_float(qqqm_data.get("price"), 0.0),
+                qqqm_ma50=_safe_float(qqqm_data.get("sma_50"), 0.0),
+                qqqm_ma200=_safe_float(qqqm_data.get("sma_200"), 0.0),
+                drawdown_from_200ma=_sma200_gap,
+                qqqm_current_pct=round(qqqm_pct, 2),
+                sgov_current_pct=round(sgov_pct, 2),
+                # ─────────────────────────────────────────────────────────
                 articles=market_news,
                 aggregated_signals=nb.get("aggregated_signals", {}),
                 theme_info=nb.get("theme_info", {}),
@@ -1845,6 +1854,28 @@ with tab3:
             <span>💾 Cache: {_cache_label}</span>
             <span>📊 Regime: {_regime_chg_label}</span>
             <span>♻️ 전략: {_reuse_label}</span>
+        </div>""", unsafe_allow_html=True)
+
+        # ── AI 해석 기준 지표 요약 ────────────────────────────────────
+        _ind = (orch_result.get("decision_context") or {}).get("indicators") or {}
+        _ind_vix   = _ind.get("VIX", _safe_float((vix_data or {}).get("price"), 20.0))
+        _ind_fng   = _ind.get("fear_greed", _safe_int((fng_data or {}).get("value"), 50))
+        _ind_tny   = _ind.get("10Y_treasury", _safe_float((tnx_data or {}).get("price"), 0.0))
+        _ind_oil   = _ind.get("oil_price", _safe_float((oil_data or {}).get("price"), 0.0))
+        _ind_rsi   = _ind.get("QQQM_RSI", _safe_float(qqqm_data.get("rsi"), 50.0))
+        _ind_gap   = _ind.get("QQQM_SMA200_gap", 0.0)
+        _fng_label = (fng_data or {}).get("classification", "")
+        _fng_str   = f"{_ind_fng}" + (f" ({_fng_label})" if _fng_label else "")
+        st.markdown(f"""
+        <div style="background:#0f172a;border:1px solid #334155;border-radius:8px;
+                    padding:10px 16px;margin-bottom:12px;font-size:0.82em;color:#94a3b8;">
+            <span style="color:#60a5fa;font-weight:600;">📊 AI 해석 기준 지표 &nbsp;|&nbsp;</span>
+            VIX <span style="color:#e2e8f0;font-weight:600;">{_ind_vix:.2f}</span>
+            &nbsp;·&nbsp; Fear&Greed <span style="color:#e2e8f0;font-weight:600;">{_fng_str}</span>
+            &nbsp;·&nbsp; 10Y 금리 <span style="color:#e2e8f0;font-weight:600;">{_ind_tny:.2f}%</span>
+            &nbsp;·&nbsp; 유가 <span style="color:#e2e8f0;font-weight:600;">${_ind_oil:.2f}</span>
+            &nbsp;·&nbsp; QQQM RSI <span style="color:#e2e8f0;font-weight:600;">{_ind_rsi:.1f}</span>
+            &nbsp;·&nbsp; SMA200 갭 <span style="color:#e2e8f0;font-weight:600;">{_ind_gap:+.2f}%</span>
         </div>""", unsafe_allow_html=True)
 
         # ── 에러 표시 헬퍼 ──────────────────────────────────────────

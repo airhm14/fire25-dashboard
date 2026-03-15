@@ -391,9 +391,11 @@ def run(
                 "vix": vix,
                 "qqqm_vs_ma50": "above" if qqqm_price >= qqqm_ma50 else "below",
                 "qqqm_vs_ma200": "above" if qqqm_price >= qqqm_ma200 else "below",
+                "drawdown_from_200ma": drawdown_from_200ma,
             },
             "macro": {
                 "macro_bias": _macro_summary.get("macro_bias", "neutral"),
+                "spread_10y_2y": spread_10y_2y,
             },
             "news": {
                 "macro_bias": _na_macro.get("macro_bias", "neutral"),

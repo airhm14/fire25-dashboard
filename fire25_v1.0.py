@@ -1784,7 +1784,7 @@ with tab3:
                 qqqm_price=_safe_float(qqqm_data.get("price"), 0.0),
                 qqqm_ma50=_safe_float(qqqm_data.get("sma_50"), 0.0),
                 qqqm_ma200=_safe_float(qqqm_data.get("sma_200"), 0.0),
-                drawdown_from_200ma=_sma200_gap,
+                drawdown_from_200ma=_sma200_gap / 100.0,  # _sma200_gap은 % 단위 → 소수로 변환
                 qqqm_current_pct=round(qqqm_pct, 2),
                 sgov_current_pct=round(sgov_pct, 2),
                 # ─────────────────────────────────────────────────────────
